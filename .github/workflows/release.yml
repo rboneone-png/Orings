@@ -1,0 +1,58 @@
+name: Release APK
+
+# 兩種觸發方式：
+# 1. 在 Actions 頁面手動執行「Release APK」，輸入版本號（會在 main 最新版建立標籤）
+# 2. 推送版本標籤，例如 v0.2.0
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本號（例如 v0.1.0）"
+        required: true
+        default: "v0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build APK
+        run: |
+          ./gradlew :core:test :app:assembleDebug \
+            -PappVersionName="${VERSION#v}" \
+            -PappVersionCode="${{ github.run_number }}"
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/orings-${VERSION}.apk"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: O型環設計 ${{ env.VERSION }}
+          files: dist/*.apk
+          body: |
+            ## 安裝
+            1. 下載下方 Assets 中的 `orings-${{ env.VERSION }}.apk`
+            2. 在手機上開啟，依提示允許「安裝未知來源的應用程式」
+            3. 安裝完成後，桌面會出現「O型環設計」
+
+            網頁版：https://rboneone-png.github.io/Orings/
+
+            > 此為 Debug 簽章版本，供測試使用，不能上架 Google Play。

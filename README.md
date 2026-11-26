@@ -13,6 +13,13 @@ Android App（Kotlin + Jetpack Compose），用來計算 O 型環溝槽的壓縮
 
 沒有 Android SDK 的環境會自動略過 `:app`，只建置 `:core`。
 
+## 下載
+
+- **Android App**：到 [Releases](https://github.com/rboneone-png/Orings/releases) 下載最新的 `orings-vX.Y.Z.apk`
+- **網頁版**：https://rboneone-png.github.io/Orings/
+
+發佈新版本：在 Actions 頁面執行「Release APK」並輸入版本號，或推送 `v*` 標籤。
+
 ## 開始
 
 1. 用 Android Studio 開啟本資料夾（會自動建立 `local.properties`），按 Run。

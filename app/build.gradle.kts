@@ -13,8 +13,9 @@ android {
         applicationId = "com.orings.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        // 發佈流程會用 -PappVersionName / -PappVersionCode 帶入版本號
+        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 1
+        versionName = (findProperty("appVersionName") as String?) ?: "0.1.0"
     }
 
     buildTypes {
