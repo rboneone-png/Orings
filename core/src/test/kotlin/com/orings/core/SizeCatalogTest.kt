@@ -122,6 +122,10 @@ class SizeCatalogTest {
         val byId = SizeCatalog.search("21.8", idTolerance = 0.1)
         assertTrue(byId.any { it.code == "P22" })
         assertTrue(byId.all { abs(it.innerDiameter - 21.8) <= 0.1 || it.code.contains("21.8") })
+
+        // 英制輸入：0.734 in = 18.64 mm → AS568 -210
+        val byInch = SizeCatalog.search("0.734", setOf(Standard.AS568), idTolerance = 0.05, unit = LengthUnit.INCH)
+        assertEquals(listOf("-210"), byInch.map { it.code })
     }
 
     @Test

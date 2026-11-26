@@ -16,17 +16,18 @@ object SizeCatalog {
     /**
      * 搜尋：
      * - 代號部分比對（"21" 會找到 -210、-021、P21…）
-     * - 或輸入數字，找內徑在 ±[idTolerance] mm 內的尺寸
+     * - 或輸入數字（以 [unit] 解讀），找內徑在 ±[idTolerance] mm 內的尺寸
      */
     fun search(
         query: String,
         standards: Set<Standard> = Standard.entries.toSet(),
         idTolerance: Double = 0.5,
+        unit: LengthUnit = LengthUnit.MM,
     ): List<StandardSize> {
         val q = query.trim().uppercase()
         val pool = all.filter { it.standard in standards }
         if (q.isEmpty()) return pool
-        val number = q.toDoubleOrNull()
+        val number = unit.parseToMm(q)
         return pool.filter { s ->
             s.code.uppercase().contains(q) ||
                 (number != null && abs(s.innerDiameter - number) <= idTolerance)

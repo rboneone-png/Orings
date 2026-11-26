@@ -17,7 +17,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,29 +29,39 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.orings.core.Gland
-import java.util.Locale
 import com.orings.core.GlandCalculator
 import com.orings.core.GlandResult
+import com.orings.core.LengthUnit
+import com.orings.core.Material
 import com.orings.core.ORing
 import com.orings.core.SealType
 import com.orings.core.Service
+import com.orings.core.Severity
 import com.orings.core.SizeCatalog
 import com.orings.core.StandardSize
-import com.orings.core.Severity
 
+/**
+ * 溝槽設計畫面。輸入欄位以 [unit] 顯示，內部計算一律換成 mm。
+ */
 @Composable
-fun GlandScreen() {
+fun GlandScreen(
+    unit: LengthUnit,
+    onUnitChange: (LengthUnit) -> Unit,
+    service: Service,
+    onServiceChange: (Service) -> Unit,
+    material: Material?,
+    modifier: Modifier = Modifier,
+) {
     var sealType by rememberSaveable { mutableStateOf(SealType.PISTON) }
-    var service by rememberSaveable { mutableStateOf(Service.STATIC) }
-    var ringId by rememberSaveable { mutableStateOf("20.0") }
-    var ringCs by rememberSaveable { mutableStateOf("3.53") }
-    var mateDia by rememberSaveable { mutableStateOf("26.0") }
-    var grooveDia by rememberSaveable { mutableStateOf("20.5") }
-    var grooveWidth by rememberSaveable { mutableStateOf("4.8") }
-    var faceDepth by rememberSaveable { mutableStateOf("2.7") }
+    // 文字欄位依目前單位儲存；切換單位時一起換算
+    var ringId by rememberSaveable { mutableStateOf(unit.format(20.0)) }
+    var ringCs by rememberSaveable { mutableStateOf(unit.format(3.53)) }
+    var mateDia by rememberSaveable { mutableStateOf(unit.format(26.0)) }
+    var grooveDia by rememberSaveable { mutableStateOf(unit.format(20.5)) }
+    var grooveWidth by rememberSaveable { mutableStateOf(unit.format(4.8)) }
+    var faceDepth by rememberSaveable { mutableStateOf(unit.format(2.7)) }
 
     var parsed by remember { mutableStateOf<GlandResult?>(null) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
@@ -60,12 +69,24 @@ fun GlandScreen() {
     var showPicker by rememberSaveable { mutableStateOf(false) }
     var candidates by remember { mutableStateOf<List<SizeCatalog.Candidate>?>(null) }
 
-    fun d(s: String) = s.trim().replace(",", ".").toDoubleOrNull() ?: throw IllegalArgumentException("請輸入有效數字")
+    /** 解析輸入（目前單位）→ mm */
+    fun d(s: String) = unit.parseToMm(s) ?: throw IllegalArgumentException("請輸入有效數字")
+
+    /** mm → 目前單位的文字 */
+    fun fmt(mm: Double) = unit.format(mm)
 
     fun ring() = ORing(d(ringId), d(ringCs))
 
-    // 固定用 Locale.US，避免部分地區把小數點格式化成逗號後無法再解析
-    fun fmt(v: Double) = String.format(Locale.US, "%.3f", v).trimEnd('0').trimEnd('.')
+    fun changeUnit(newUnit: LengthUnit) {
+        if (newUnit == unit) return
+        ringId = newUnit.convertText(ringId, unit)
+        ringCs = newUnit.convertText(ringCs, unit)
+        mateDia = newUnit.convertText(mateDia, unit)
+        grooveDia = newUnit.convertText(grooveDia, unit)
+        grooveWidth = newUnit.convertText(grooveWidth, unit)
+        faceDepth = newUnit.convertText(faceDepth, unit)
+        onUnitChange(newUnit)
+    }
 
     fun calculate() {
         runCatching {
@@ -89,7 +110,6 @@ fun GlandScreen() {
             calculate()
         }.onFailure { error = it.message }
     }
-
 
     fun pickSize(size: StandardSize) {
         ringId = fmt(size.innerDiameter)
@@ -117,78 +137,94 @@ fun GlandScreen() {
     }
 
     if (showPicker) {
-        SizePickerDialog(onDismiss = { showPicker = false }, onPick = ::pickSize)
+        SizePickerDialog(unit = unit, onDismiss = { showPicker = false }, onPick = ::pickSize)
     }
 
-    Scaffold { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        ChipRow(LengthUnit.entries, unit, { it.label }, ::changeUnit)
+
+        Text("密封型式", style = MaterialTheme.typography.labelLarge)
+        ChipRow(SealType.entries, sealType, { it.label }) { sealType = it }
+        ChipRow(Service.entries, service, { it.label }, onServiceChange)
+
+        MaterialBanner(material, service)
+
+        Text("O 型環（${unit.symbol}）", style = MaterialTheme.typography.labelLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            NumberField("內徑 ID", ringId, { ringId = it; sizeLabel = null }, Modifier.weight(1f))
+            NumberField("線徑 CS", ringCs, { ringCs = it; sizeLabel = null }, Modifier.weight(1f))
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("O 型環溝槽設計", style = MaterialTheme.typography.headlineSmall)
+            OutlinedButton(onClick = { showPicker = true }) { Text("從尺寸表選") }
+            Text(sizeLabel ?: "自訂尺寸", style = MaterialTheme.typography.bodyMedium)
+        }
 
-            Text("密封型式", style = MaterialTheme.typography.labelLarge)
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                SealType.entries.forEach {
-                    FilterChip(selected = sealType == it, onClick = { sealType = it }, label = { Text(it.label) })
-                }
+        Text("溝槽（${unit.symbol}）", style = MaterialTheme.typography.labelLarge)
+        when (sealType) {
+            SealType.PISTON -> {
+                NumberField("缸筒內徑", mateDia, { mateDia = it })
+                NumberField("溝槽底徑（活塞上）", grooveDia, { grooveDia = it })
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Service.entries.forEach {
-                    FilterChip(selected = service == it, onClick = { service = it }, label = { Text(it.label) })
-                }
+            SealType.ROD -> {
+                NumberField("軸桿外徑", mateDia, { mateDia = it })
+                NumberField("溝槽底徑（殼體內）", grooveDia, { grooveDia = it })
             }
+            SealType.FACE -> {
+                NumberField("溝槽內徑", grooveDia, { grooveDia = it })
+                NumberField("溝槽深度", faceDepth, { faceDepth = it })
+            }
+        }
+        NumberField("溝槽寬度", grooveWidth, { grooveWidth = it })
 
-            Text("O 型環（mm）", style = MaterialTheme.typography.labelLarge)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                NumberField("內徑 ID", ringId, { ringId = it; sizeLabel = null }, Modifier.weight(1f))
-                NumberField("線徑 CS", ringCs, { ringCs = it; sizeLabel = null }, Modifier.weight(1f))
-            }
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedButton(onClick = { showPicker = true }) { Text("從尺寸表選") }
-                Text(sizeLabel ?: "自訂尺寸", style = MaterialTheme.typography.bodyMedium)
-            }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = ::calculate, modifier = Modifier.weight(1f)) { Text("計算") }
+            OutlinedButton(onClick = ::suggest, modifier = Modifier.weight(1f)) { Text("推薦溝槽") }
+        }
+        OutlinedButton(onClick = ::findSizes, modifier = Modifier.fillMaxWidth()) {
+            Text("依配合直徑找適用標準尺寸")
+        }
 
-            Text("溝槽（mm）", style = MaterialTheme.typography.labelLarge)
-            when (sealType) {
-                SealType.PISTON -> {
-                    NumberField("缸筒內徑", mateDia, { mateDia = it })
-                    NumberField("溝槽底徑（活塞上）", grooveDia, { grooveDia = it })
-                }
-                SealType.ROD -> {
-                    NumberField("軸桿外徑", mateDia, { mateDia = it })
-                    NumberField("溝槽底徑（殼體內）", grooveDia, { grooveDia = it })
-                }
-                SealType.FACE -> {
-                    NumberField("溝槽內徑", grooveDia, { grooveDia = it })
-                    NumberField("溝槽深度", faceDepth, { faceDepth = it })
-                }
-            }
-            NumberField("溝槽寬度", grooveWidth, { grooveWidth = it })
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        candidates?.let { CandidateList(it, unit, ::pickCandidate) }
+        parsed?.let { ResultCard(it, unit) }
+    }
+}
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = ::calculate, modifier = Modifier.weight(1f)) { Text("計算") }
-                OutlinedButton(onClick = ::suggest, modifier = Modifier.weight(1f)) { Text("推薦溝槽") }
-            }
-            OutlinedButton(onClick = ::findSizes, modifier = Modifier.fillMaxWidth()) {
-                Text("依配合直徑找適用標準尺寸")
-            }
-
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            candidates?.let { CandidateList(it, ::pickCandidate) }
-            parsed?.let { ResultCard(it) }
+@Composable
+fun <T> ChipRow(items: List<T>, selected: T, label: (T) -> String, onSelect: (T) -> Unit) {
+    Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items.forEach {
+            FilterChip(selected = it == selected, onClick = { onSelect(it) }, label = { Text(label(it)) })
         }
     }
+}
+
+/** 顯示目前選用的材質；動態使用但材質不適合時提醒 */
+@Composable
+private fun MaterialBanner(material: Material?, service: Service) {
+    val text = when {
+        material == null -> "材質：未選擇（到「材質選擇」分頁挑選）"
+        service == Service.DYNAMIC && !material.dynamicOk -> "材質：${material.label}　! 不適合動態使用"
+        else -> "材質：${material.label}　${material.tempMinC}～${material.tempMaxC}°C"
+    }
+    val warn = material != null && service == Service.DYNAMIC && !material.dynamicOk
+    Text(
+        text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = if (warn) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable
@@ -209,7 +245,7 @@ private fun NumberField(
 }
 
 @Composable
-private fun ResultCard(r: GlandResult) {
+private fun ResultCard(r: GlandResult, unit: LengthUnit) {
     val ok = r.isOk && r.issues.isEmpty()
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -230,8 +266,8 @@ private fun ResultCard(r: GlandResult) {
                 },
                 fontWeight = FontWeight.Bold,
             )
-            ResultRow("溝槽深度", "%.3f mm".format(r.depth))
-            ResultRow("有效線徑", "%.3f mm".format(r.effectiveCrossSection))
+            ResultRow("溝槽深度", "${unit.format(r.depth)} ${unit.symbol}")
+            ResultRow("有效線徑", "${unit.format(r.effectiveCrossSection)} ${unit.symbol}")
             ResultRow(
                 "壓縮率",
                 "%.1f%%（建議 %.0f–%.0f%%）".format(
@@ -256,10 +292,4 @@ private fun ResultRow(label: String, value: String) {
         Text(label)
         Text(value, fontWeight = FontWeight.Medium)
     }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun GlandScreenPreview() {
-    MaterialTheme { GlandScreen() }
 }
