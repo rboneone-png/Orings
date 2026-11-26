@@ -12,6 +12,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -20,19 +25,47 @@ import com.orings.core.HardwareMaterial
 import com.orings.core.Material
 import com.orings.core.Severity
 import com.orings.core.Thermal
+import com.orings.core.ThermalInput
 import java.util.Locale
+
+/**
+ * 工作溫度與金屬件材質（溝槽設計與 O型環設計共用）。
+ * 兩個溫度都空白時不做熱膨脹修正。
+ */
+class ThermalInputState(
+    tMinText: String = "-20",
+    tMaxText: String = "80",
+    hardware: HardwareMaterial = HardwareMaterial.STEEL,
+) {
+    var tMinText by mutableStateOf(tMinText)
+    var tMaxText by mutableStateOf(tMaxText)
+    var hardware by mutableStateOf(hardware)
+
+    /** 溫度欄位空白時回傳 null；輸入無效時丟出錯誤 */
+    fun input(material: Material?): ThermalInput? {
+        if (tMinText.isBlank() && tMaxText.isBlank()) return null
+        val lo = tMinText.trim().toDoubleOrNull() ?: throw IllegalArgumentException("請輸入有效的最低溫度")
+        val hi = tMaxText.trim().toDoubleOrNull() ?: throw IllegalArgumentException("請輸入有效的最高溫度")
+        return ThermalInput.of(lo, hi, material, hardware)
+    }
+
+    companion object {
+        val Saver: Saver<ThermalInputState, Any> = listSaver(
+            save = { listOf(it.tMinText, it.tMaxText, it.hardware.name) },
+            restore = { ThermalInputState(it[0], it[1], HardwareMaterial.valueOf(it[2])) },
+        )
+    }
+}
 
 /** 工作溫度與金屬件材質輸入 */
 @Composable
-fun ThermalInputSection(
-    tMin: String,
-    onTMin: (String) -> Unit,
-    tMax: String,
-    onTMax: (String) -> Unit,
-    hardware: HardwareMaterial,
-    onHardware: (HardwareMaterial) -> Unit,
-    material: Material?,
-) {
+fun ThermalInputSection(state: ThermalInputState, material: Material?) {
+    val tMin = state.tMinText
+    val tMax = state.tMaxText
+    val hardware = state.hardware
+    val onTMin: (String) -> Unit = { state.tMinText = it }
+    val onTMax: (String) -> Unit = { state.tMaxText = it }
+    val onHardware: (HardwareMaterial) -> Unit = { state.hardware = it }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("工作溫度與熱膨脹", style = MaterialTheme.typography.labelLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -62,11 +95,11 @@ fun ThermalInputSection(
 
 /** 熱膨脹修正結果：組裝、最低溫、最高溫三個狀態 */
 @Composable
-fun ThermalCard(analysis: Thermal.Analysis) {
+fun ThermalCard(analysis: Thermal.Analysis, title: String = "熱膨脹修正") {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
-                if (analysis.isOk) "熱膨脹修正：各溫度皆無錯誤" else "熱膨脹修正：有溫度不合格",
+                if (analysis.isOk) "$title：各溫度皆無錯誤" else "$title：有溫度不合格",
                 fontWeight = FontWeight.Bold,
                 color = if (analysis.isOk) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
             )

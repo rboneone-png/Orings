@@ -27,6 +27,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.orings.core.Gland
 import com.orings.core.LengthUnit
+import com.orings.core.Material
+import com.orings.core.Materials
 import com.orings.core.RingDesigner
 import com.orings.core.SealType
 import com.orings.core.Service
@@ -43,6 +45,10 @@ fun RingDesignScreen(
     onServiceChange: (Service) -> Unit,
     operatingState: OperatingInputState,
     onPick: (StandardSize, Gland) -> Unit,
+    material: Material?,
+    thermalState: ThermalInputState,
+    strictSurface: Boolean,
+    onStrictSurfaceChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var sealType by rememberSaveable { mutableStateOf(SealType.PISTON) }
@@ -79,6 +85,9 @@ fun RingDesignScreen(
             radialGap = gap,
             hardness = op.hardness,
             backupRings = op.backupRings,
+            thermal = thermalState.input(material),
+            // 沒選材質時以預設的 NBR 計算膨脹，也用 NBR 的溫度範圍提醒
+            material = material ?: Materials.find("NBR"),
         )
     }
 
@@ -114,11 +123,15 @@ fun RingDesignScreen(
 
         OperatingSection(operatingState, unit)
 
+        ThermalInputSection(thermalState, material)
+
         outcome.onFailure { Text(it.message ?: "輸入有誤", color = MaterialTheme.colorScheme.error) }
         outcome.onSuccess { (gland, design) ->
             IdealCard(design, unit)
+            design.idealThermal?.let { ThermalCard(it, title = "理想尺寸的熱膨脹修正") }
             MatchList(design, unit) { size -> onPick(size, gland) }
         }
+        SurfaceFinishCard(service, unit, strictSurface, onStrictSurfaceChange)
     }
 }
 
@@ -168,7 +181,10 @@ private fun IdealCard(design: RingDesigner.Design, unit: LengthUnit) {
 private fun MatchList(design: RingDesigner.Design, unit: LengthUnit, onPick: (StandardSize) -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("合適的標準尺寸（點選帶入溝槽設計）", fontWeight = FontWeight.Bold)
+            Text(
+                "合適的標準尺寸（點選帶入溝槽設計）" + if (design.idealThermal != null) "，已排除高低溫會出錯的尺寸" else "",
+                fontWeight = FontWeight.Bold,
+            )
             if (design.matches.isEmpty()) {
                 Text(
                     "沒有不出錯的標準尺寸，請調整溝槽、硬度或加擋圈。",
@@ -193,6 +209,17 @@ private fun MatchList(design: RingDesigner.Design, unit: LengthUnit, onPick: (St
                         ) + if (warnings > 0) "　! $warnings 項警告" else "　✓",
                         style = MaterialTheme.typography.bodySmall,
                     )
+                    m.thermal?.let { t ->
+                        val cold = t.points[1].result
+                        val hot = t.points[2].result
+                        val thermalWarnings = t.points.drop(1).sumOf { p -> p.result.issues.size }
+                        Text(
+                            "低溫壓縮 %.1f%%　高溫填充 %.1f%%".format(cold.compression * 100, hot.fill * 100) +
+                                if (thermalWarnings > 0) "　! 高低溫 $thermalWarnings 項警告" else "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
                 HorizontalDivider()
             }

@@ -10,10 +10,17 @@ import kotlin.math.sqrt
  *    壓縮率取建議範圍中間值，反推內徑與線徑。
  * 2. 標準尺寸：逐一用溝槽檢查所有標準 O 型環，依「問題數 → 偏離目標程度」排序。
  * 3. 硬度：若提供壓力與間隙，推薦硬度並判斷是否需要擋圈。
+ * 4. 熱膨脹：若提供溫度範圍，標準尺寸在任一溫度出錯即排除，高低溫的警告也計入排序。
  */
 object RingDesigner {
 
-    data class Match(val size: StandardSize, val result: GlandResult, val score: Double)
+    data class Match(
+        val size: StandardSize,
+        val result: GlandResult,
+        val score: Double,
+        /** 熱膨脹修正；未提供溫度時為 null */
+        val thermal: Thermal.Analysis? = null,
+    )
 
     data class Design(
         /** 理想內徑（mm） */
@@ -28,6 +35,8 @@ object RingDesigner {
         val hardness: Extrusion.Recommendation?,
         /** 依合適程度排序的標準尺寸（只含沒有錯誤的） */
         val matches: List<Match>,
+        /** 理想尺寸的熱膨脹修正；未提供溫度時為 null */
+        val idealThermal: Thermal.Analysis? = null,
     )
 
     /**
@@ -35,6 +44,8 @@ object RingDesigner {
      * @param radialGap 擠出間隙（mm）
      * @param hardness 指定硬度；null 則採用推薦硬度
      * @param backupRings 擋圈數量；null 則依推薦（需要時用 1 個）
+     * @param thermal 溫度範圍與膨脹係數；null 則不做熱膨脹修正
+     * @param material O 型環材質，用於溫度範圍提醒
      */
     fun design(
         gland: Gland,
@@ -43,6 +54,8 @@ object RingDesigner {
         radialGap: Double = 0.1,
         hardness: Hardness? = null,
         backupRings: Int? = null,
+        thermal: ThermalInput? = null,
+        material: Material? = null,
         standards: Set<Standard> = Standard.entries.toSet(),
         limit: Int = 10,
     ): Design {
@@ -65,22 +78,29 @@ object RingDesigner {
         val idealId = seat / (1 + targetStretch)
         val effectiveCs = gland.depth / (1 - targetCompression)
         val idealCs = effectiveCs * sqrt(1 + targetStretch)
-        val idealResult = GlandCalculator.calculate(ORing(idealId, idealCs), gland, service, limits, operating)
+        val idealRing = ORing(idealId, idealCs)
+        val idealResult = GlandCalculator.calculate(idealRing, gland, service, limits, operating)
+        val idealThermal = thermal?.let { Thermal.analyze(idealRing, gland, it, service, operating, material) }
 
         val matches = SizeCatalog.all.asSequence()
             .filter { it.standard in standards && !it.isPortSeal && it.suitableForService(service) }
-            .map { size ->
-                val r = GlandCalculator.calculate(size.toORing(), gland, service, limits, operating)
-                val score = r.issues.count { it.severity == Severity.WARNING } * 1.0 +
+            .mapNotNull { size ->
+                val ring = size.toORing()
+                val r = GlandCalculator.calculate(ring, gland, service, limits, operating)
+                if (!r.isOk) return@mapNotNull null
+                val t = thermal?.let { Thermal.analyze(ring, gland, it, service, operating, material) }
+                if (t != null && !t.isOk) return@mapNotNull null
+                // 高低溫的警告也計入（組裝溫度的已算在 r 裡）
+                val thermalWarnings = t?.points?.drop(1)?.sumOf { p -> p.result.issues.count { it.severity == Severity.WARNING } } ?: 0
+                val score = (r.issues.count { it.severity == Severity.WARNING } + thermalWarnings) * 1.0 +
                     abs(r.compression - targetCompression) * 10 +
                     abs(r.stretch - targetStretch) * 10
-                Match(size, r, score)
+                Match(size, r, score, t)
             }
-            .filter { it.result.isOk }
             .sortedBy { it.score }
             .take(limit)
             .toList()
 
-        return Design(idealId, idealCs, idealResult, targetCompression, targetStretch, recommendation, matches)
+        return Design(idealId, idealCs, idealResult, targetCompression, targetStretch, recommendation, matches, idealThermal)
     }
 }

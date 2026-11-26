@@ -307,6 +307,17 @@ tr.pick:hover td { background: var(--accent-soft); }
           </div>
         </div>
         <div class="group" id="op-r"></div>
+
+        <div class="group">
+          <h2>工作溫度與熱膨脹</h2>
+          <div class="fields">
+            <div class="field"><label for="rth-min">最低溫度（留空則不修正）</label><div class="input"><input id="rth-min" inputmode="numeric"><span class="unit">°C</span></div></div>
+            <div class="field"><label for="rth-max">最高溫度</label><div class="input"><input id="rth-max" inputmode="numeric"><span class="unit">°C</span></div></div>
+          </div>
+          <span class="sub">金屬件材質</span>
+          <div class="seg" role="group" aria-label="金屬件材質" id="rhwSeg"></div>
+          <div class="hint" id="rcteHint"></div>
+        </div>
       </div>
 
       <div class="panel" aria-live="polite">
@@ -318,9 +329,36 @@ tr.pick:hover td { background: var(--accent-soft); }
         <h2>合適的標準尺寸</h2>
         <div class="table-wrap" style="max-height:420px">
           <table>
-            <thead><tr><th>規格</th><th style="text-align:right">ID × CS</th><th style="text-align:right">壓縮</th><th style="text-align:right">拉伸</th><th style="text-align:right">填充</th><th>狀態</th><th></th></tr></thead>
+            <thead><tr><th>規格</th><th style="text-align:right">ID × CS</th><th style="text-align:right">壓縮</th><th style="text-align:right">拉伸</th><th style="text-align:right">填充</th><th class="th-col" style="text-align:right">低溫壓縮</th><th class="th-col" style="text-align:right">高溫填充</th><th>狀態</th><th></th></tr></thead>
             <tbody id="rBody"></tbody>
           </table>
+        </div>
+        <p class="note-foot" id="rThNote" hidden>已排除在最低溫或最高溫會出錯的尺寸。</p>
+
+        <div class="group" id="rthBox" hidden>
+          <h2>理想尺寸的熱膨脹修正</h2>
+          <div id="rthVerdict" class="verdict"></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>狀態</th><th style="text-align:right">溫度</th><th style="text-align:right">壓縮</th><th style="text-align:right">拉伸</th><th style="text-align:right">填充</th></tr></thead>
+              <tbody id="rthBody"></tbody>
+            </table>
+          </div>
+          <ul class="issues" id="rthIssues"></ul>
+          <p class="note-foot">膨脹係數為一般手冊近似值；未考慮低溫硬化、介質膨潤與壓縮永久變形。</p>
+        </div>
+
+        <div class="group">
+          <h2 id="rsfTitle">表面粗糙度建議</h2>
+          <div class="chips"><button class="chip" type="button" id="rsfStrict" aria-pressed="false">壓力脈動／氣體或真空</button></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>表面</th><th style="text-align:right">Ra</th><th style="text-align:right">Rz</th></tr></thead>
+              <tbody id="rsfBody"></tbody>
+            </table>
+          </div>
+          <p class="note-foot" id="rsfNotes"></p>
+          <p class="note-foot">一般密封件廠商設計指引的經驗值，正式設計請以廠商型錄為準。</p>
         </div>
       </div>
     </div>
@@ -699,7 +737,7 @@ const Core = (() => {
 
   // ---- O 型環設計（已知溝槽反推） ----
   function designRing(g, service = "STATIC", pressure = null, gap = 0.1, hardness = null, backups = null,
-                      standards = Object.keys(Standards), limit = 10) {
+                      thermal = null, material = null, standards = Object.keys(Standards), limit = 10) {
     const limits = limitsFor(g.type, service);
     const tc = (limits.minC + limits.maxC) / 2;
     const ts = g.type === "ROD" ? 0 : limits.maxS / 2;
@@ -710,19 +748,25 @@ const Core = (() => {
     const seat = g.type === "ROD" ? g.mate : g.grooveDia;
     const idealId = seat / (1 + ts);
     const idealCs = g.depth / (1 - tc) * Math.sqrt(1 + ts);
-    const idealResult = calculate(oring(idealId, idealCs), g, service, limits, op);
-    const matches = allSizes
-      .filter((sz) => standards.includes(sz.standard) && !isPortSeal(sz) && okForService(sz, service))
-      .map((sz) => {
-        const r = calculate(oring(sz.id, sz.cs), g, service, limits, op);
-        const score = r.issues.filter((i) => i.severity === "WARNING").length * 1.0 +
-          Math.abs(r.compression - tc) * 10 + Math.abs(r.stretch - ts) * 10;
-        return { size: sz, result: r, score };
-      })
-      .filter((m) => m.result.isOk)
-      .sort((a, b) => a.score - b.score)
-      .slice(0, limit);
-    return { idealId, idealCs, idealResult, tc, ts, rec, op, matches };
+    const idealRing = oring(idealId, idealCs);
+    const idealResult = calculate(idealRing, g, service, limits, op);
+    const idealThermal = thermal ? thermalAnalyze(idealRing, g, thermal, service, op, material) : null;
+    const matches = [];
+    for (const sz of allSizes) {
+      if (!(standards.includes(sz.standard) && !isPortSeal(sz) && okForService(sz, service))) continue;
+      const ring = oring(sz.id, sz.cs);
+      const r = calculate(ring, g, service, limits, op);
+      if (!r.isOk) continue;
+      const t = thermal ? thermalAnalyze(ring, g, thermal, service, op, material) : null;
+      if (t && !t.isOk) continue;
+      // 高低溫的警告也計入（組裝溫度的已算在 r 裡）
+      const tw = t ? t.points.slice(1).reduce((n, p) => n + p.result.issues.filter((i) => i.severity === "WARNING").length, 0) : 0;
+      const score = (r.issues.filter((i) => i.severity === "WARNING").length + tw) * 1.0 +
+        Math.abs(r.compression - tc) * 10 + Math.abs(r.stretch - ts) * 10;
+      matches.push({ size: sz, result: r, score, thermal: t });
+    }
+    matches.sort((a, b) => a.score - b.score);
+    return { idealId, idealCs, idealResult, idealThermal, tc, ts, rec, op, matches: matches.slice(0, limit) };
   }
 
   // ---- 材質 ----
@@ -1174,17 +1218,25 @@ if (typeof module !== "undefined") module.exports = Core;
     if (!num.test(hi)) throw new Error("請輸入有效的最高溫度");
     return Core.thermalOf(Number(lo), Number(hi), selectedMaterial(), state.hw);
   }
-  function renderThermalInputs() {
-    segment($("hwSeg"), Object.values(Core.HardwareMaterials).map((h) => [h.key, h.label]), state.hw, (k) => {
-      state.hw = k; renderThermalInputs(); renderDesign(); save();
-    });
+  function renderThermalInputs(except) {
     const m = selectedMaterial();
-    $("cteHint").textContent = `O 型環膨脹係數：${m ? m.code : "NBR（未選材質，預設）"} ${((m ? m.cte : 1.3e-4) * 1e4).toFixed(1)}×10⁻⁴/°C；` +
+    const hint = `O 型環膨脹係數：${m ? m.code : "NBR（未選材質，預設）"} ${((m ? m.cte : 1.3e-4) * 1e4).toFixed(1)}×10⁻⁴/°C；` +
       `金屬 ${(Core.HardwareMaterials[state.hw].cte * 1e6).toFixed(1)}×10⁻⁶/°C`;
+    [["", "th"], ["r", "rth"]].forEach(([px, tp]) => {
+      segment($(px + "hwSeg"), Object.values(Core.HardwareMaterials).map((h) => [h.key, h.label]), state.hw, (k) => {
+        state.hw = k; renderThermalInputs(); renderDesign(); renderRing(); save();
+      });
+      $(px + "cteHint").textContent = hint;
+      // 兩個分頁共用溫度；正在輸入的欄位不覆寫
+      if (tp + "-min" !== except) $(tp + "-min").value = state.thMin;
+      if (tp + "-max" !== except) $(tp + "-max").value = state.thMax;
+    });
   }
-  ["th-min", "th-max"].forEach((id) => $(id).addEventListener("input", () => {
-    state.thMin = $("th-min").value; state.thMax = $("th-max").value; renderDesign(); save();
+  ["th-min", "th-max", "rth-min", "rth-max"].forEach((id) => $(id).addEventListener("input", (e) => {
+    if (id.endsWith("min")) state.thMin = e.target.value; else state.thMax = e.target.value;
+    renderThermalInputs(id); renderDesign(); renderRing(); save();
   }));
+  const effectiveMaterial = () => selectedMaterial() || Core.Materials.find((x) => x.code === "NBR");
   function renderThermal(ring, g, op) {
     const box = $("thBox");
     let input;
@@ -1195,22 +1247,23 @@ if (typeof module !== "undefined") module.exports = Core;
     if (!input) { box.hidden = true; return; }
     box.hidden = false;
     // 沒選材質時以預設的 NBR 計算膨脹，也用 NBR 的溫度範圍提醒
-    const a = Core.thermalAnalyze(ring, g, input, state.service, op,
-      selectedMaterial() || Core.Materials.find((x) => x.code === "NBR"));
-    const v = $("thVerdict");
+    fillThermalTable("th", Core.thermalAnalyze(ring, g, input, state.service, op, effectiveMaterial()));
+  }
+  function fillThermalTable(px, a) {
+    const v = $(px + "Verdict");
     const warn = a.notes.length || a.points.some((p) => p.result.issues.length);
     if (!a.isOk) { v.className = "verdict bad"; v.textContent = "✗ 有溫度下設計不合格"; }
     else if (warn) { v.className = "verdict warn"; v.textContent = "! 各溫度皆可用，但有警告"; }
     else { v.className = "verdict ok"; v.textContent = "✓ 整個溫度範圍都合格"; }
     const pc = (x) => (x * 100).toFixed(1) + "%";
-    $("thBody").innerHTML = a.points.map((p) => {
+    $(px + "Body").innerHTML = a.points.map((p) => {
       const bad = !p.result.isOk, w = p.result.issues.length;
       return `<tr><td>${p.label}${bad ? ` <span class="pill POOR">不合格</span>` : w ? ` <span class="pill FAIR">${w} 警告</span>` : ""}</td>
         <td class="n">${p.tempC.toFixed(1).replace(/\.0$/, "")}°C</td><td class="n">${pc(p.result.compression)}</td>
         <td class="n">${pc(p.result.stretch)}</td><td class="n">${pc(p.result.fill)}</td></tr>`;
     }).join("");
     // 組裝狀態的問題已列在上方，這裡只列高低溫的問題
-    $("thIssues").innerHTML = [
+    $(px + "Issues").innerHTML = [
       ...a.points.slice(1).flatMap((p) => p.result.issues.map((i) =>
         `<li class="${i.severity}">${p.label} ${p.tempC.toFixed(1).replace(/\.0$/, "")}°C：${esc(i.message)}</li>`)),
       ...a.notes.map((n) => `<li class="WARNING">${esc(n)}</li>`),
@@ -1222,15 +1275,17 @@ if (typeof module !== "undefined") module.exports = Core;
     const mm = state.unit === "MM", sym = mm ? "µm" : "µin";
     const v = (um) => mm ? um.toFixed(1) : (um * Core.UIN_PER_UM).toFixed(0);
     const rows = Core.surfaceFinish(state.service, state.sfStrict);
-    $("sfTitle").textContent = `表面粗糙度建議（${Core.Service[state.service].label}）`;
-    $("sfStrict").setAttribute("aria-pressed", String(state.sfStrict));
-    $("sfBody").innerHTML = rows.map((r) => `<tr>
-      <td>${esc(Core.Surfaces[r.surface])}</td>
-      <td class="n">${r.raMin !== null ? `${v(r.raMin)}–${v(r.raMax)}` : `≤ ${v(r.raMax)}`} ${sym}</td>
-      <td class="n">≤ ${v(r.rzMax)} ${sym}</td></tr>`).join("");
-    $("sfNotes").innerHTML = rows.map((r) => `<b>${esc(Core.Surfaces[r.surface].replace(/（.*）/, ""))}</b>：${esc(r.note)}`).join("<br>");
+    ["", "r"].forEach((px) => {
+      $(px + "sfTitle").textContent = `表面粗糙度建議（${Core.Service[state.service].label}）`;
+      $(px + "sfStrict").setAttribute("aria-pressed", String(state.sfStrict));
+      $(px + "sfBody").innerHTML = rows.map((r) => `<tr>
+        <td>${esc(Core.Surfaces[r.surface])}</td>
+        <td class="n">${r.raMin !== null ? `${v(r.raMin)}–${v(r.raMax)}` : `≤ ${v(r.raMax)}`} ${sym}</td>
+        <td class="n">≤ ${v(r.rzMax)} ${sym}</td></tr>`).join("");
+      $(px + "sfNotes").innerHTML = rows.map((r) => `<b>${esc(Core.Surfaces[r.surface].replace(/（.*）/, ""))}</b>：${esc(r.note)}`).join("<br>");
+    });
   }
-  $("sfStrict").onclick = () => { state.sfStrict = !state.sfStrict; renderSurface(); save(); };
+  ["sfStrict", "rsfStrict"].forEach((id) => { $(id).onclick = () => { state.sfStrict = !state.sfStrict; renderSurface(); save(); }; });
 
   // ---- O型環設計（已知溝槽反推） ----
   function renderRingControls() {
@@ -1267,11 +1322,13 @@ if (typeof module !== "undefined") module.exports = Core;
       g = ringGland();
       o = computeOp();
       d = Core.designRing(g, state.service, o.pressure, state.gapMm,
-        state.hard === "AUTO" ? null : state.hard, state.bak === "AUTO" ? null : Number(state.bak));
+        state.hard === "AUTO" ? null : state.hard, state.bak === "AUTO" ? null : Number(state.bak),
+        currentThermal(), effectiveMaterial());
     } catch (e) {
       err.hidden = false; err.textContent = e.message;
       $("rVerdict").className = "verdict bad"; $("rVerdict").textContent = "無法計算";
       ["rIdeal", "rFacts", "rIssues", "rBody"].forEach((id) => { $(id).innerHTML = ""; });
+      $("rthBox").hidden = true;
       return;
     }
     err.hidden = !inputError; err.textContent = inputError || "";
@@ -1297,18 +1354,25 @@ if (typeof module !== "undefined") module.exports = Core;
       ...(d.op ? [["擠出極限", d.idealResult.extLimit.toFixed(1) + " MPa"]] : []),
     ].map(([k, val]) => `<dt>${k}</dt><dd>${esc(val)}</dd>`).join("");
     $("rIssues").innerHTML = d.idealResult.issues.map((i) => `<li class="${i.severity}">理想尺寸：${esc(i.message)}</li>`).join("");
+    const hasTh = !!d.idealThermal;
+    document.querySelectorAll("#tab-ring .th-col").forEach((el) => { el.hidden = !hasTh; });
+    $("rThNote").hidden = !hasTh;
+    $("rthBox").hidden = !hasTh;
+    if (hasTh) fillThermalTable("rth", d.idealThermal);
     $("rBody").innerHTML = d.matches.length ? d.matches.map((m, i) => {
-      const w = m.result.issues.length;
+      const thW = m.thermal ? m.thermal.points.slice(1).reduce((n, p) => n + p.result.issues.length, 0) : 0;
+      const w = m.result.issues.length + thW;
+      const thCols = hasTh ? `<td class="n">${Core.pct(m.thermal.points[1].result.compression)}</td><td class="n">${Core.pct(m.thermal.points[2].result.fill)}</td>` : "";
       return `<tr class="pick" data-i="${i}">
         <td><b>${esc(Core.displayName(m.size))}</b></td>
         <td class="n">${n(m.size.id)} × ${n(m.size.cs)}</td>
         <td class="n">${Core.pct(m.result.compression)}</td>
         <td class="n">${Core.pct(m.result.stretch)}</td>
-        <td class="n">${Core.pct(m.result.fill)}</td>
-        <td>${w ? `<span class="pill FAIR" title="${esc(m.result.issues.map((x) => x.message).join("；"))}">${w} 項警告</span>` : `<span class="pill GOOD">合格</span>`}</td>
+        <td class="n">${Core.pct(m.result.fill)}</td>${thCols}
+        <td>${w ? `<span class="pill FAIR" title="${esc([...m.result.issues.map((x) => x.message), ...(m.thermal ? m.thermal.points.slice(1).flatMap((p) => p.result.issues.map((x) => p.label + "：" + x.message)) : [])].join("；"))}">${w} 項警告</span>` : `<span class="pill GOOD">合格</span>`}</td>
         <td><button class="row-btn" type="button" data-i="${i}">帶入</button></td>
       </tr>`;
-    }).join("") : `<tr><td colspan="7">沒有可用的標準尺寸</td></tr>`;
+    }).join("") : `<tr><td colspan="9">沒有可用的標準尺寸</td></tr>`;
   }
   $("rBody").onclick = (e) => {
     const row = e.target.closest("[data-i]"); if (!row) return;
@@ -1398,7 +1462,6 @@ if (typeof module !== "undefined") module.exports = Core;
 
   // ---- 初始化 ----
   $("t-min").value = state.tMin; $("t-max").value = state.tMax;
-  $("th-min").value = state.thMin; $("th-max").value = state.thMax;
   renderThermalInputs();
   renderUnit(); renderTabs(); renderSealControls(); renderRingControls(); renderOp(); writeFields(); renderDesign(); renderRing(); renderSurface();
   renderStdChips(); renderMediaChips();
