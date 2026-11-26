@@ -19,6 +19,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,10 +49,13 @@ import com.orings.core.StandardSize
 @Composable
 fun GlandScreen(
     unit: LengthUnit,
-    onUnitChange: (LengthUnit) -> Unit,
     service: Service,
     onServiceChange: (Service) -> Unit,
     material: Material?,
+    operatingState: OperatingInputState,
+    /** 從「O型環設計」分頁帶入的尺寸與溝槽 */
+    incoming: Pair<StandardSize, Gland>?,
+    onIncomingConsumed: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var sealType by rememberSaveable { mutableStateOf(SealType.PISTON) }
@@ -77,15 +81,19 @@ fun GlandScreen(
 
     fun ring() = ORing(d(ringId), d(ringCs))
 
-    fun changeUnit(newUnit: LengthUnit) {
-        if (newUnit == unit) return
-        ringId = newUnit.convertText(ringId, unit)
-        ringCs = newUnit.convertText(ringCs, unit)
-        mateDia = newUnit.convertText(mateDia, unit)
-        grooveDia = newUnit.convertText(grooveDia, unit)
-        grooveWidth = newUnit.convertText(grooveWidth, unit)
-        faceDepth = newUnit.convertText(faceDepth, unit)
-        onUnitChange(newUnit)
+    // 單位在最上方切換；欄位文字記錄自己是用哪個單位寫的，單位改變時一起換算
+    var fieldsUnit by rememberSaveable { mutableStateOf(unit) }
+    LaunchedEffect(unit) {
+        if (fieldsUnit != unit) {
+            ringId = unit.convertText(ringId, fieldsUnit)
+            ringCs = unit.convertText(ringCs, fieldsUnit)
+            mateDia = unit.convertText(mateDia, fieldsUnit)
+            grooveDia = unit.convertText(grooveDia, fieldsUnit)
+            grooveWidth = unit.convertText(grooveWidth, fieldsUnit)
+            faceDepth = unit.convertText(faceDepth, fieldsUnit)
+            fieldsUnit = unit
+            parsed = null
+        }
     }
 
     fun calculate() {
@@ -94,7 +102,7 @@ fun GlandScreen(
                 SealType.FACE -> Gland(sealType, d(grooveWidth), d(grooveDia), faceDepth = d(faceDepth))
                 else -> Gland(sealType, d(grooveWidth), d(grooveDia), d(mateDia))
             }
-            GlandCalculator.calculate(ring(), gland, service)
+            GlandCalculator.calculate(ring(), gland, service, operating = operatingState.operating(unit))
         }.onSuccess { parsed = it; error = null }
             .onFailure { parsed = null; error = it.message }
     }
@@ -102,7 +110,7 @@ fun GlandScreen(
     fun suggest() {
         runCatching {
             val mate = if (sealType == SealType.FACE) 0.0 else d(mateDia)
-            GlandCalculator.suggest(ring(), sealType, service, mate)
+            GlandCalculator.suggest(ring(), sealType, service, mate, operating = operatingState.operating(unit))
         }.onSuccess { g ->
             grooveWidth = fmt(g.grooveWidth)
             grooveDia = fmt(g.grooveDiameter)
@@ -136,6 +144,20 @@ fun GlandScreen(
         calculate()
     }
 
+    // 從「O型環設計」分頁帶入
+    LaunchedEffect(incoming) {
+        val (size, g) = incoming ?: return@LaunchedEffect
+        sealType = g.sealType
+        ringId = fmt(size.innerDiameter)
+        ringCs = fmt(size.crossSection)
+        sizeLabel = size.displayName
+        grooveWidth = fmt(g.grooveWidth)
+        grooveDia = fmt(g.grooveDiameter)
+        if (g.sealType == SealType.FACE) faceDepth = fmt(g.faceDepth) else mateDia = fmt(g.mateDiameter)
+        onIncomingConsumed()
+        calculate()
+    }
+
     if (showPicker) {
         SizePickerDialog(unit = unit, onDismiss = { showPicker = false }, onPick = ::pickSize)
     }
@@ -147,8 +169,6 @@ fun GlandScreen(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        ChipRow(LengthUnit.entries, unit, { it.label }, ::changeUnit)
-
         Text("密封型式", style = MaterialTheme.typography.labelLarge)
         ChipRow(SealType.entries, sealType, { it.label }) { sealType = it }
         ChipRow(Service.entries, service, { it.label }, onServiceChange)
@@ -184,6 +204,8 @@ fun GlandScreen(
             }
         }
         NumberField("溝槽寬度", grooveWidth, { grooveWidth = it })
+
+        OperatingSection(operatingState, unit)
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = ::calculate, modifier = Modifier.weight(1f)) { Text("計算") }
@@ -276,6 +298,10 @@ private fun ResultCard(r: GlandResult, unit: LengthUnit) {
             )
             ResultRow("拉伸率", "%.1f%%（建議 ≤ %.0f%%）".format(r.stretch * 100, r.limits.maxStretch * 100))
             ResultRow("填充率", "%.1f%%（建議 ≤ %.0f%%）".format(r.fill * 100, r.limits.maxFill * 100))
+            r.extrusionLimit?.let { ResultRow("擠出極限", "%.1f MPa".format(it)) }
+            if (r.extrusionLimit != null) {
+                ResultRow("扣擋圈後溝槽寬", "${unit.format(r.effectiveWidth)} ${unit.symbol}")
+            }
             r.issues.forEach {
                 Text(
                     (if (it.severity == Severity.ERROR) "✗ " else "! ") + it.message,
