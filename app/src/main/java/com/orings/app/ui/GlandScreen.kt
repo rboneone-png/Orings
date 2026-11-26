@@ -32,10 +32,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.orings.core.Gland
+import com.orings.core.HardwareMaterial
+import com.orings.core.Thermal
+import com.orings.core.ThermalInput
 import com.orings.core.GlandCalculator
 import com.orings.core.GlandResult
 import com.orings.core.LengthUnit
 import com.orings.core.Material
+import com.orings.core.Materials
 import com.orings.core.ORing
 import com.orings.core.SealType
 import com.orings.core.Service
@@ -72,6 +76,10 @@ fun GlandScreen(
     var sizeLabel by rememberSaveable { mutableStateOf<String?>(null) }
     var showPicker by rememberSaveable { mutableStateOf(false) }
     var strictSurface by rememberSaveable { mutableStateOf(false) }
+    var tMinText by rememberSaveable { mutableStateOf("-20") }
+    var tMaxText by rememberSaveable { mutableStateOf("80") }
+    var hardware by rememberSaveable { mutableStateOf(HardwareMaterial.STEEL) }
+    var thermalAnalysis by remember { mutableStateOf<Thermal.Analysis?>(null) }
     var candidates by remember { mutableStateOf<List<SizeCatalog.Candidate>?>(null) }
 
     /** 解析輸入（目前單位）→ mm */
@@ -81,6 +89,14 @@ fun GlandScreen(
     fun fmt(mm: Double) = unit.format(mm)
 
     fun ring() = ORing(d(ringId), d(ringCs))
+
+    /** 溫度欄位空白時不做熱膨脹修正；輸入無效時丟出錯誤 */
+    fun thermalInput(): ThermalInput? {
+        if (tMinText.isBlank() && tMaxText.isBlank()) return null
+        val lo = tMinText.trim().toDoubleOrNull() ?: throw IllegalArgumentException("請輸入有效的最低溫度")
+        val hi = tMaxText.trim().toDoubleOrNull() ?: throw IllegalArgumentException("請輸入有效的最高溫度")
+        return ThermalInput.of(lo, hi, material, hardware)
+    }
 
     // 單位在最上方切換；欄位文字記錄自己是用哪個單位寫的，單位改變時一起換算
     var fieldsUnit by rememberSaveable { mutableStateOf(unit) }
@@ -103,15 +119,24 @@ fun GlandScreen(
                 SealType.FACE -> Gland(sealType, d(grooveWidth), d(grooveDia), faceDepth = d(faceDepth))
                 else -> Gland(sealType, d(grooveWidth), d(grooveDia), d(mateDia))
             }
-            GlandCalculator.calculate(ring(), gland, service, operating = operatingState.operating(unit))
+            val op = operatingState.operating(unit)
+            val result = GlandCalculator.calculate(ring(), gland, service, operating = op)
+            // 沒選材質時以預設的 NBR 計算膨脹，也用 NBR 的溫度範圍提醒
+            thermalAnalysis = thermalInput()?.let {
+                Thermal.analyze(ring(), gland, it, service, op, material ?: Materials.find("NBR"))
+            }
+            result
         }.onSuccess { parsed = it; error = null }
-            .onFailure { parsed = null; error = it.message }
+            .onFailure { parsed = null; thermalAnalysis = null; error = it.message }
     }
 
     fun suggest() {
         runCatching {
             val mate = if (sealType == SealType.FACE) 0.0 else d(mateDia)
-            GlandCalculator.suggest(ring(), sealType, service, mate, operating = operatingState.operating(unit))
+            GlandCalculator.suggest(
+                ring(), sealType, service, mate,
+                operating = operatingState.operating(unit), thermal = thermalInput(),
+            )
         }.onSuccess { g ->
             grooveWidth = fmt(g.grooveWidth)
             grooveDia = fmt(g.grooveDiameter)
@@ -208,6 +233,11 @@ fun GlandScreen(
 
         OperatingSection(operatingState, unit)
 
+        ThermalInputSection(
+            tMinText, { tMinText = it }, tMaxText, { tMaxText = it },
+            hardware, { hardware = it }, material,
+        )
+
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = ::calculate, modifier = Modifier.weight(1f)) { Text("計算") }
             OutlinedButton(onClick = ::suggest, modifier = Modifier.weight(1f)) { Text("推薦溝槽") }
@@ -219,6 +249,7 @@ fun GlandScreen(
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         candidates?.let { CandidateList(it, unit, ::pickCandidate) }
         parsed?.let { ResultCard(it, unit) }
+        if (parsed != null) thermalAnalysis?.let { ThermalCard(it) }
         SurfaceFinishCard(service, unit, strictSurface) { strictSurface = it }
     }
 }

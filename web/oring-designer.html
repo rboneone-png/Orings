@@ -224,6 +224,17 @@ tr.pick:hover td { background: var(--accent-soft); }
 
         <div class="group" id="op-d"></div>
 
+        <div class="group">
+          <h2>工作溫度與熱膨脹</h2>
+          <div class="fields">
+            <div class="field"><label for="th-min">最低溫度（留空則不修正）</label><div class="input"><input id="th-min" inputmode="numeric"><span class="unit">°C</span></div></div>
+            <div class="field"><label for="th-max">最高溫度</label><div class="input"><input id="th-max" inputmode="numeric"><span class="unit">°C</span></div></div>
+          </div>
+          <span class="sub">金屬件材質</span>
+          <div class="seg" role="group" aria-label="金屬件材質" id="hwSeg"></div>
+          <div class="hint" id="cteHint"></div>
+        </div>
+
         <div class="group" id="candBox" hidden>
           <h2>適用的標準尺寸</h2>
           <div class="table-wrap" style="max-height:340px">
@@ -245,6 +256,19 @@ tr.pick:hover td { background: var(--accent-soft); }
         <dl class="facts" id="facts"></dl>
         <ul class="issues" id="issues"></ul>
         <div class="error" id="err" hidden></div>
+        <div class="group" id="thBox" hidden>
+          <h2>熱膨脹修正</h2>
+          <div id="thVerdict" class="verdict"></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>狀態</th><th style="text-align:right">溫度</th><th style="text-align:right">壓縮</th><th style="text-align:right">拉伸</th><th style="text-align:right">填充</th></tr></thead>
+              <tbody id="thBody"></tbody>
+            </table>
+          </div>
+          <ul class="issues" id="thIssues"></ul>
+          <p class="note-foot">膨脹係數為一般手冊近似值；未考慮低溫硬化、介質膨潤與壓縮永久變形。</p>
+        </div>
+
         <div class="group">
           <h2 id="sfTitle">表面粗糙度建議</h2>
           <div class="chips"><button class="chip" type="button" id="sfStrict" aria-pressed="false">壓力脈動／氣體或真空</button></div>
@@ -475,7 +499,18 @@ const Core = (() => {
       isOk: !issues.some((i) => i.severity === "ERROR") };
   }
 
-  function suggest(ring, type, service = "STATIC", mate = 0, limits = limitsFor(type, service), op = null) {
+  function suggest(ring, type, service = "STATIC", mate = 0, limits = limitsFor(type, service), op = null, thermal = null) {
+    const g0 = suggestRoom(ring, type, service, mate, limits, op);
+    if (!thermal || thermal.tMaxC <= thermal.assemblyC) return g0;
+    // 高溫時 O 型環膨脹比溝槽多，填充率上升：用實際高溫計算的填充率回推所需寬度
+    const backupWidth = (op ? op.backupRings : 0) * Extrusion.backupThickness(ring.cs);
+    const [hr, hg] = thermalAt(ring, g0, thermal, thermal.tMaxC);
+    const hotFill = calculate(hr, hg, service, limits, op).fill;
+    if (hotFill <= HOT_FILL_TARGET) return g0;
+    const width = (g0.width - backupWidth) * hotFill / HOT_FILL_TARGET + backupWidth;
+    return gland(g0.type, Math.ceil(width * 100) / 100, g0.grooveDia, g0.mate, g0.faceDepth);
+  }
+  function suggestRoom(ring, type, service, mate, limits, op) {
     const target = (limits.minC + limits.maxC) / 2;
     const backupWidth = (op ? op.backupRings : 0) * Extrusion.backupThickness(ring.cs);
     const dims = (s) => {
@@ -697,17 +732,60 @@ const Core = (() => {
   const mediaKeys = Object.keys(Media);
   const r = (...v) => Object.fromEntries(mediaKeys.map((k, i) => [k, ({ G: "GOOD", F: "FAIR", P: "POOR" })[v[i]]]));
   const Materials = [
-    { code: "NBR", name: "丁腈橡膠", min: -30, max: 100, dyn: true, cost: 1, res: r("G", "G", "F", "P", "P", "P", "F", "P"), note: "最常用、便宜；耐油佳，不耐臭氧與日照" },
-    { code: "HNBR", name: "氫化丁腈橡膠", min: -30, max: 150, dyn: true, cost: 3, res: r("G", "G", "G", "F", "P", "P", "F", "P"), note: "NBR 強化版，耐溫、耐磨、耐熱水較好" },
-    { code: "FKM", name: "氟橡膠（Viton®）", min: -20, max: 200, dyn: true, cost: 3, res: r("G", "G", "F", "G", "P", "P", "G", "P"), note: "耐高溫、耐油與燃油；不耐酮類、煞車油與蒸汽" },
-    { code: "EPDM", name: "三元乙丙橡膠", min: -50, max: 150, dyn: true, cost: 1, res: r("P", "P", "G", "G", "G", "G", "G", "G"), note: "耐水、蒸汽、煞車油、耐候；遇礦物油會膨脹" },
-    { code: "VMQ", name: "矽橡膠", min: -60, max: 200, dyn: false, cost: 2, res: r("F", "P", "F", "G", "F", "P", "F", "F"), note: "溫度範圍最寬、食品級常用；強度與耐磨差，只適合靜態" },
-    { code: "FVMQ", name: "氟矽橡膠", min: -60, max: 175, dyn: false, cost: 4, res: r("G", "G", "F", "G", "P", "P", "F", "P"), note: "耐低溫又耐燃油（航太常用）；強度差，只適合靜態" },
-    { code: "CR", name: "氯丁橡膠（Neoprene）", min: -40, max: 100, dyn: true, cost: 1, res: r("F", "P", "F", "G", "P", "P", "F", "P"), note: "耐候、耐冷媒；耐油中等" },
-    { code: "AU", name: "聚氨酯（PU）", min: -30, max: 80, dyn: true, cost: 2, res: r("G", "F", "P", "G", "P", "P", "P", "P"), note: "耐磨與抗擠出最好，適合高壓液壓；不耐熱水（水解）" },
-    { code: "FFKM", name: "全氟橡膠", min: -15, max: 300, dyn: true, cost: 5, res: r("G", "G", "G", "G", "G", "G", "G", "G"), note: "幾乎耐所有化學品與高溫；價格極高" },
+    { code: "NBR", name: "丁腈橡膠", min: -30, max: 100, dyn: true, cost: 1, cte: 1.3e-4, res: r("G", "G", "F", "P", "P", "P", "F", "P"), note: "最常用、便宜；耐油佳，不耐臭氧與日照" },
+    { code: "HNBR", name: "氫化丁腈橡膠", min: -30, max: 150, dyn: true, cost: 3, cte: 1.3e-4, res: r("G", "G", "G", "F", "P", "P", "F", "P"), note: "NBR 強化版，耐溫、耐磨、耐熱水較好" },
+    { code: "FKM", name: "氟橡膠（Viton®）", min: -20, max: 200, dyn: true, cost: 3, cte: 1.6e-4, res: r("G", "G", "F", "G", "P", "P", "G", "P"), note: "耐高溫、耐油與燃油；不耐酮類、煞車油與蒸汽" },
+    { code: "EPDM", name: "三元乙丙橡膠", min: -50, max: 150, dyn: true, cost: 1, cte: 1.6e-4, res: r("P", "P", "G", "G", "G", "G", "G", "G"), note: "耐水、蒸汽、煞車油、耐候；遇礦物油會膨脹" },
+    { code: "VMQ", name: "矽橡膠", min: -60, max: 200, dyn: false, cost: 2, cte: 2.5e-4, res: r("F", "P", "F", "G", "F", "P", "F", "F"), note: "溫度範圍最寬、食品級常用；強度與耐磨差，只適合靜態" },
+    { code: "FVMQ", name: "氟矽橡膠", min: -60, max: 175, dyn: false, cost: 4, cte: 2.2e-4, res: r("G", "G", "F", "G", "P", "P", "F", "P"), note: "耐低溫又耐燃油（航太常用）；強度差，只適合靜態" },
+    { code: "CR", name: "氯丁橡膠（Neoprene）", min: -40, max: 100, dyn: true, cost: 1, cte: 1.4e-4, res: r("F", "P", "F", "G", "P", "P", "F", "P"), note: "耐候、耐冷媒；耐油中等" },
+    { code: "AU", name: "聚氨酯（PU）", min: -30, max: 80, dyn: true, cost: 2, cte: 1.5e-4, res: r("G", "F", "P", "G", "P", "P", "P", "P"), note: "耐磨與抗擠出最好，適合高壓液壓；不耐熱水（水解）" },
+    { code: "FFKM", name: "全氟橡膠", min: -15, max: 300, dyn: true, cost: 5, cte: 2.3e-4, res: r("G", "G", "G", "G", "G", "G", "G", "G"), note: "幾乎耐所有化學品與高溫；價格極高" },
   ];
   const matLabel = (m) => `${m.code}（${m.name}）`;
+
+  // ---- 熱膨脹修正（與 Kotlin Thermal 相同） ----
+  const HardwareMaterials = {
+    STEEL: { key: "STEEL", label: "碳鋼", cte: 11.5e-6 },
+    STAINLESS: { key: "STAINLESS", label: "不鏽鋼 304", cte: 17.3e-6 },
+    ALUMINUM: { key: "ALUMINUM", label: "鋁合金", cte: 23.0e-6 },
+    BRASS: { key: "BRASS", label: "黃銅", cte: 19.0e-6 },
+    CAST_IRON: { key: "CAST_IRON", label: "鑄鐵", cte: 10.5e-6 },
+    TITANIUM: { key: "TITANIUM", label: "鈦合金", cte: 8.6e-6 },
+  };
+  const HOT_FILL_TARGET = 0.80;
+  function thermalInput(tMinC, tMaxC, ringCte, hardwareCte, assemblyC = 20.0) {
+    if (tMinC > tMaxC) throw new Error("最低溫度不能高於最高溫度");
+    if (!(ringCte > 0 && hardwareCte > 0)) throw new Error("膨脹係數必須大於 0");
+    return { tMinC, tMaxC, ringCte, hardwareCte, assemblyC };
+  }
+  const thermalOf = (tMinC, tMaxC, material, hw) =>
+    thermalInput(tMinC, tMaxC, (material || Materials.find((m) => m.code === "NBR")).cte, HardwareMaterials[hw].cte);
+  function thermalAt(ring, g, input, tempC) {
+    const dT = tempC - input.assemblyC;
+    const fr = 1 + input.ringCte * dT, fm = 1 + input.hardwareCte * dT;
+    return [oring(ring.id * fr, ring.cs * fr),
+      gland(g.type, g.width * fm, g.grooveDia * fm, g.mate * fm, g.faceDepth * fm)];
+  }
+  const fmt1 = (v) => v.toFixed(1).replace(/\.0$/, "");
+  function thermalAnalyze(ring, g, input, service = "STATIC", op = null, material = null) {
+    const points = [["組裝", input.assemblyC], ["最低溫", input.tMinC], ["最高溫", input.tMaxC]].map(([label, t]) => {
+      const [r, gg] = thermalAt(ring, g, input, t);
+      return { label, tempC: t, ring: r, gland: gg, result: calculate(r, gg, service, limitsFor(gg.type, service), op) };
+    });
+    const notes = [];
+    if (material) {
+      if (input.tMinC < material.min) notes.push(`最低溫 ${fmt1(input.tMinC)}°C 低於 ${material.code} 下限 ${material.min}°C，O 型環會變硬失去彈性`);
+      if (input.tMaxC > material.max) notes.push(`最高溫 ${fmt1(input.tMaxC)}°C 高於 ${material.code} 上限 ${material.max}°C，O 型環會老化或分解`);
+    }
+    return { points, notes, isOk: points.every((p) => p.result.isOk) };
+  }
+  function hotFillFactor(input) {
+    const dT = input.tMaxC - input.assemblyC;
+    if (dT <= 0) return 1.0;
+    const k = (1 + input.ringCte * dT) / (1 + input.hardwareCte * dT);
+    return k * k;
+  }
 
   function evaluate(tMin, tMax, media, service = "STATIC") {
     if (tMin > tMax) throw new Error("最低溫度不能高於最高溫度");
@@ -732,6 +810,7 @@ const Core = (() => {
     SealType, Service, Units, Standards, Media, Ratings, Materials,
     Hardness, hardnessKeys, PressureUnits, Extrusion, operating, designRing,
     Surfaces, UIN_PER_UM, surfaceFinish,
+    HardwareMaterials, HOT_FILL_TARGET, thermalInput, thermalOf, thermalAt, thermalAnalyze, hotFillFactor,
     oring, gland, limitsFor, calculate, suggest, fmtUnit, parseUnit,
     as568, jis, allSizes, displayName, findSize, search, suitableFor, evaluate, matLabel, pct,
   };
@@ -773,13 +852,16 @@ if (typeof module !== "undefined") module.exports = Core;
     // O型環設計分頁的溝槽
     rseal: store.get("rseal", "PISTON"),
     sfStrict: store.get("sfStrict", false),
+    thMin: store.get("thMin", "-20"),
+    thMax: store.get("thMax", "80"),
+    hw: store.get("hw", "STEEL"),
     rmm: Object.assign({ mate: 26.0, groove: 20.5, width: 4.8, face: 2.7 }, store.get("rmm", {})),
   };
   const ringFieldIds = { mate: "r-mate", groove: "r-groove", width: "r-width", face: "r-face" };
   const fieldIds = { id: "f-id", cs: "f-cs", mate: "f-mate", groove: "f-groove", width: "f-width", face: "f-face" };
   const unit = () => Core.Units[state.unit];
   const save = () => ["tab", "unit", "seal", "service", "mm", "sizeLabel", "material", "tMin", "tMax", "media", "stds",
-    "pUnit", "pText", "gapMm", "hard", "bak", "rseal", "rmm", "sfStrict"].forEach((k) => store.set(k, state[k]));
+    "pUnit", "pText", "gapMm", "hard", "bak", "rseal", "rmm", "sfStrict", "thMin", "thMax", "hw"].forEach((k) => store.set(k, state[k]));
 
   function segment(el, items, current, onPick) {
     el.innerHTML = items.map(([k, label]) =>
@@ -960,6 +1042,7 @@ if (typeof module !== "undefined") module.exports = Core;
       err.hidden = false; err.textContent = e.message;
       $("verdict").className = "verdict bad"; $("verdict").textContent = "無法計算";
       $("metrics").innerHTML = ""; $("facts").innerHTML = ""; $("issues").innerHTML = ""; $("diagram").innerHTML = "";
+      $("thBox").hidden = true;
       return;
     }
     err.hidden = !inputError; err.textContent = inputError || "";
@@ -991,6 +1074,7 @@ if (typeof module !== "undefined") module.exports = Core;
     ].map(([k, val]) => `<dt>${k}</dt><dd>${esc(val)}</dd>`).join("");
     $("issues").innerHTML = res.issues.map((i) => `<li class="${i.severity}">${esc(i.message)}</li>`).join("");
     drawSection(res, g, op ? op.backupRings : 0, ring.cs);
+    renderThermal(ring, g, op);
   }
 
   // 截面示意：溝槽寬 × 深依比例；壓縮後的 O 型環用等面積橢圓近似
@@ -1039,7 +1123,7 @@ if (typeof module !== "undefined") module.exports = Core;
     try {
       const ring = Core.oring(state.mm.id, state.mm.cs);
       const g = Core.suggest(ring, state.seal, state.service, state.seal === "FACE" ? 0 : state.mm.mate,
-        Core.limitsFor(state.seal, state.service), computeOp().op);
+        Core.limitsFor(state.seal, state.service), computeOp().op, currentThermal());
       state.mm.width = g.width; state.mm.groove = g.grooveDia;
       if (state.seal === "FACE") state.mm.face = g.faceDepth;
       writeFields(); renderDesign(); save();
@@ -1076,6 +1160,60 @@ if (typeof module !== "undefined") module.exports = Core;
     writeFields(); renderDesign(); save();
   };
   $("goSizes").onclick = () => showTab("sizes");
+
+  // ---- 熱膨脹 ----
+  const selectedMaterial = () => Core.Materials.find((x) => x.code === state.material) || null;
+  /** 溫度欄位都空白時不修正；輸入無效時丟出錯誤 */
+  function currentThermal() {
+    const lo = String(state.thMin).trim(), hi = String(state.thMax).trim();
+    if (lo === "" && hi === "") return null;
+    const num = /^-?\d+(\.\d+)?$/;
+    if (!num.test(lo)) throw new Error("請輸入有效的最低溫度");
+    if (!num.test(hi)) throw new Error("請輸入有效的最高溫度");
+    return Core.thermalOf(Number(lo), Number(hi), selectedMaterial(), state.hw);
+  }
+  function renderThermalInputs() {
+    segment($("hwSeg"), Object.values(Core.HardwareMaterials).map((h) => [h.key, h.label]), state.hw, (k) => {
+      state.hw = k; renderThermalInputs(); renderDesign(); save();
+    });
+    const m = selectedMaterial();
+    $("cteHint").textContent = `O 型環膨脹係數：${m ? m.code : "NBR（未選材質，預設）"} ${((m ? m.cte : 1.3e-4) * 1e4).toFixed(1)}×10⁻⁴/°C；` +
+      `金屬 ${(Core.HardwareMaterials[state.hw].cte * 1e6).toFixed(1)}×10⁻⁶/°C`;
+  }
+  ["th-min", "th-max"].forEach((id) => $(id).addEventListener("input", () => {
+    state.thMin = $("th-min").value; state.thMax = $("th-max").value; renderDesign(); save();
+  }));
+  function renderThermal(ring, g, op) {
+    const box = $("thBox");
+    let input;
+    try { input = currentThermal(); } catch (e) {
+      box.hidden = false; $("thVerdict").className = "verdict bad"; $("thVerdict").textContent = e.message;
+      $("thBody").innerHTML = ""; $("thIssues").innerHTML = ""; return;
+    }
+    if (!input) { box.hidden = true; return; }
+    box.hidden = false;
+    // 沒選材質時以預設的 NBR 計算膨脹，也用 NBR 的溫度範圍提醒
+    const a = Core.thermalAnalyze(ring, g, input, state.service, op,
+      selectedMaterial() || Core.Materials.find((x) => x.code === "NBR"));
+    const v = $("thVerdict");
+    const warn = a.notes.length || a.points.some((p) => p.result.issues.length);
+    if (!a.isOk) { v.className = "verdict bad"; v.textContent = "✗ 有溫度下設計不合格"; }
+    else if (warn) { v.className = "verdict warn"; v.textContent = "! 各溫度皆可用，但有警告"; }
+    else { v.className = "verdict ok"; v.textContent = "✓ 整個溫度範圍都合格"; }
+    const pc = (x) => (x * 100).toFixed(1) + "%";
+    $("thBody").innerHTML = a.points.map((p) => {
+      const bad = !p.result.isOk, w = p.result.issues.length;
+      return `<tr><td>${p.label}${bad ? ` <span class="pill POOR">不合格</span>` : w ? ` <span class="pill FAIR">${w} 警告</span>` : ""}</td>
+        <td class="n">${p.tempC.toFixed(1).replace(/\.0$/, "")}°C</td><td class="n">${pc(p.result.compression)}</td>
+        <td class="n">${pc(p.result.stretch)}</td><td class="n">${pc(p.result.fill)}</td></tr>`;
+    }).join("");
+    // 組裝狀態的問題已列在上方，這裡只列高低溫的問題
+    $("thIssues").innerHTML = [
+      ...a.points.slice(1).flatMap((p) => p.result.issues.map((i) =>
+        `<li class="${i.severity}">${p.label} ${p.tempC.toFixed(1).replace(/\.0$/, "")}°C：${esc(i.message)}</li>`)),
+      ...a.notes.map((n) => `<li class="WARNING">${esc(n)}</li>`),
+    ].join("");
+  }
 
   // ---- 表面粗糙度 ----
   function renderSurface() {
@@ -1253,11 +1391,13 @@ if (typeof module !== "undefined") module.exports = Core;
   }
   $("matCards").onclick = (e) => {
     const b = e.target.closest("[data-k]"); if (!b) return;
-    state.material = b.dataset.k; save(); renderMaterials(); renderDesign(); showTab("design");
+    state.material = b.dataset.k; save(); renderMaterials(); renderThermalInputs(); renderDesign(); showTab("design");
   };
 
   // ---- 初始化 ----
   $("t-min").value = state.tMin; $("t-max").value = state.tMax;
+  $("th-min").value = state.thMin; $("th-max").value = state.thMax;
+  renderThermalInputs();
   renderUnit(); renderTabs(); renderSealControls(); renderRingControls(); renderOp(); writeFields(); renderDesign(); renderRing(); renderSurface();
   renderStdChips(); renderMediaChips();
   if (state.tab === "sizes") renderSizes();
