@@ -171,6 +171,25 @@ tr.pick:hover td { background: var(--accent-soft); }
 .hint b { color: var(--ink); font-weight: 600; }
 .lede { margin: 0; color: var(--muted); font-size: .92rem; }
 .metric .v.sm { font-size: 1.1rem; }
+.save-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+.save-row .field { flex: 1 1 200px; }
+.saved-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.saved-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px; background: var(--surface); }
+.saved-card .meta { font-size: .84rem; color: var(--muted); }
+.btn.danger { color: var(--bad); }
+.btn:disabled { opacity: .6; cursor: progress; }
+/* PDF 排版用的離屏容器：固定淺色，不在畫面上顯示 */
+.pdf-host { position: fixed; left: -10000px; top: 0; width: 720px; background: #ffffff; color: #16212a; font-family: var(--font-ui); font-size: 13px; line-height: 1.55; }
+.pdf-host .blk { padding: 6px 0 10px; background: #ffffff; }
+.pdf-host h1 { font-size: 22px; margin: 0 0 4px; }
+.pdf-host .sub { color: #566672; font-size: 12px; }
+.pdf-host .vd { font-weight: 600; margin-top: 8px; font-size: 15px; }
+.pdf-host .vd.OK { color: #1b7444; } .pdf-host .vd.WARNING { color: #8f5a00; } .pdf-host .vd.ERROR { color: #b3261e; }
+.pdf-host h2 { font-size: 15px; color: #0b6a85; margin: 0 0 4px; padding-bottom: 4px; border-bottom: 1px solid #d3dce1; text-transform: none; letter-spacing: 0; }
+.pdf-host table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pdf-host td { padding: 3px 0; border: 0; white-space: normal; vertical-align: top; }
+.pdf-host td:first-child { width: 36%; color: #566672; }
+.pdf-host ul { margin: 4px 0 0; padding-left: 18px; color: #3d4a54; font-size: 12px; }
 .mat-line { font-size: .88rem; color: var(--muted); }
 .mat-line.bad { color: var(--bad); }
 @media (prefers-reduced-motion: no-preference) { .btn, .chip, .seg button { transition: background-color .15s, border-color .15s; } }
@@ -258,6 +277,16 @@ tr.pick:hover td { background: var(--accent-soft); }
         <dl class="facts" id="facts"></dl>
         <ul class="issues" id="issues"></ul>
         <div class="error" id="err" hidden></div>
+        <div class="group">
+          <h2>儲存與報告</h2>
+          <div class="save-row">
+            <div class="field"><label for="saveName">設計名稱</label><div class="input"><input id="saveName" placeholder="例如 液壓缸活塞 Ø26"></div></div>
+            <button class="btn primary" id="btnSave" type="button">儲存設計</button>
+            <button class="btn" id="btnPdf" type="button">下載 PDF</button>
+          </div>
+          <div class="hint" id="saveMsg"></div>
+        </div>
+
         <div class="group" id="thBox" hidden>
           <h2>熱膨脹修正</h2>
           <div id="thVerdict" class="verdict"></div>
@@ -361,6 +390,15 @@ tr.pick:hover td { background: var(--accent-soft); }
           <p class="note-foot">一般密封件廠商設計指引的經驗值，正式設計請以廠商型錄為準。</p>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- 存檔 -->
+  <section id="tab-saved" role="tabpanel" hidden>
+    <div class="panel">
+      <p class="lede">已存的設計只存在這個瀏覽器裡；換手機、換瀏覽器或清除瀏覽資料就看不到。</p>
+      <div class="hint" id="savedMsg"></div>
+      <div class="saved-list" id="savedList"></div>
     </div>
   </section>
 
@@ -852,8 +890,115 @@ const Core = (() => {
     }).sort((a, b) => (b.suitable - a.suitable) || (b.score - a.score) || (a.idx - b.idx));
   }
 
+  // ---- 設計存檔與報告（與 Kotlin DesignReport 相同的內容與文字） ----
+  const unitLabel = { MM: "公制 mm", INCH: "英制 inch" };
+  function recordOperating(rec) {
+    if (rec.pressureMpa === null) return null;
+    const r = Extrusion.recommend(rec.pressureMpa, rec.radialGap);
+    return operating(rec.pressureMpa, rec.radialGap, rec.hardness || r.hardness || "A90",
+      rec.backupRings !== null ? rec.backupRings : (r.needsBackup ? 1 : 0));
+  }
+  const recordMaterial = (rec) => (rec.materialCode ? Materials.find((m) => m.code === rec.materialCode) || null : null);
+  const recordThermal = (rec) => (rec.tMinC === null || rec.tMaxC === null ? null
+    : thermalOf(rec.tMinC, rec.tMaxC, recordMaterial(rec), rec.hardware));
+  const recordGland = (rec) => (rec.sealType === "FACE"
+    ? gland("FACE", rec.grooveWidth, rec.grooveDiameter, 0, rec.faceDepth)
+    : gland(rec.sealType, rec.grooveWidth, rec.grooveDiameter, rec.mateDiameter));
+  function roughnessText(r, unitKey) {
+    const mm = unitKey === "MM", sym = mm ? "µm" : "µin";
+    const v = (um) => (mm ? um.toFixed(1) : (um * UIN_PER_UM).toFixed(0));
+    const ra = r.raMin !== null ? `Ra ${v(r.raMin)}–${v(r.raMax)}` : `Ra ≤ ${v(r.raMax)}`;
+    return `${ra} ${sym}（Rz ≤ ${v(r.rzMax)} ${sym}）`;
+  }
+  const Verdicts = { OK: "✓ 設計合格", WARNING: "! 可用，但有警告", ERROR: "✗ 設計不合格" };
+  function designReport(rec) {
+    const u = Units[rec.unit];
+    const len = (mm) => `${fmtUnit(u, mm)} ${u.symbol}`;
+    const pc = (v) => (v * 100).toFixed(1) + "%";
+    const issueLine = (i) => (i.severity === "ERROR" ? "✗ " : "! ") + i.message;
+    const ring = oring(rec.ringId, rec.ringCs);
+    const g = recordGland(rec);
+    const op = recordOperating(rec);
+    const result = calculate(ring, g, rec.service, limitsFor(g.type, rec.service), op);
+    const mat = recordMaterial(rec);
+    const effMat = mat || Materials.find((m) => m.code === "NBR");
+    const tin = recordThermal(rec);
+    const thermal = tin ? thermalAnalyze(ring, g, tin, rec.service, op, effMat) : null;
+    const sections = [];
+    sections.push({ title: "基本資料", rows: [
+      ["設計名稱", rec.name], ["存檔時間", rec.savedAt], ["密封型式", SealType[rec.sealType].label],
+      ["使用條件", Service[rec.service].label], ["長度單位", unitLabel[rec.unit]]], notes: [] });
+    sections.push({ title: "O 型環", rows: [
+      ["規格", rec.sizeLabel || "自訂尺寸"], ["內徑 ID", len(ring.id)], ["線徑 CS", len(ring.cs)],
+      ["外徑 OD", len(ring.od)], ["材質", mat ? matLabel(mat) : "未指定（以 NBR 計算膨脹）"]], notes: [] });
+    const labels = { PISTON: ["缸筒內徑", "溝槽底徑（活塞上）"], ROD: ["軸桿外徑", "溝槽底徑（殼體內）"], FACE: ["溝槽深度", "溝槽內徑"] }[rec.sealType];
+    const grooveRows = rec.sealType === "FACE"
+      ? [[labels[1], len(g.grooveDia)], [labels[0], len(g.faceDepth)]]
+      : [[labels[0], len(g.mate)], [labels[1], len(g.grooveDia)]];
+    grooveRows.push(["溝槽寬度", len(g.width)], ["溝槽深度（計算）", len(result.depth)]);
+    sections.push({ title: "溝槽", rows: grooveRows, notes: [] });
+    const L = result.limits;
+    const calcRows = [
+      ["壓縮率", `${pc(result.compression)}（建議 ${pc(L.minC)}–${pc(L.maxC)}）`],
+      ["拉伸率", `${pc(result.stretch)}（建議 ≤ ${pc(L.maxS)}）`],
+      ["填充率", `${pc(result.fill)}（建議 ≤ ${pc(L.maxF)}）`],
+      ["拉伸後有效線徑", len(result.cs)],
+    ];
+    if (result.extLimit !== null) calcRows.push(["擠出極限", result.extLimit.toFixed(1) + " MPa"]);
+    if (op && op.backupRings > 0) calcRows.push(["扣擋圈後溝槽寬", len(result.effWidth)]);
+    const calcNotes = result.issues.map(issueLine);
+    sections.push({ title: "計算結果（組裝溫度）", rows: calcRows, notes: calcNotes.length ? calcNotes : ["無問題"] });
+    if (op && rec.pressureMpa !== null) {
+      const r2 = Extrusion.recommend(rec.pressureMpa, rec.radialGap);
+      const pu = PressureUnits[rec.pressureUnit];
+      let pText = `${(rec.pressureMpa / pu.per).toFixed(pu.decimals)} ${pu.label}`;
+      if (rec.pressureUnit !== "MPA") pText += `（${rec.pressureMpa.toFixed(2)} MPa）`;
+      sections.push({ title: "壓力與硬度", rows: [
+        ["工作壓力", pText],
+        ["擠出間隙（單邊）", len(rec.radialGap)],
+        ["建議硬度", (r2.hardness ? "Shore " + Hardness[r2.hardness].label : "不適用 O 型環") + (r2.needsBackup && r2.hardness ? " + 擋圈" : "")],
+        ["採用硬度", "Shore " + Hardness[op.hardness].label + (rec.hardness === null ? "（自動）" : "")],
+        ["擋圈", ["不用", "單側", "雙側"][op.backupRings] + (rec.backupRings === null ? "（自動）" : "")],
+      ], notes: [r2.reason] });
+    }
+    if (thermal) {
+      const rows = [["金屬件材質", HardwareMaterials[rec.hardware].label],
+        ["膨脹係數", `O 型環 ${(tin.ringCte * 1e4).toFixed(1)}×10⁻⁴/°C，金屬 ${(tin.hardwareCte * 1e6).toFixed(1)}×10⁻⁶/°C`]];
+      thermal.points.forEach((p) => rows.push([`${p.label} ${fmt1(p.tempC)}°C`,
+        `壓縮 ${pc(p.result.compression)}／拉伸 ${pc(p.result.stretch)}／填充 ${pc(p.result.fill)}`]));
+      const notes = [
+        ...thermal.points.slice(1).flatMap((p) => p.result.issues.map((i) => `${p.label} ${fmt1(p.tempC)}°C：` + issueLine(i))),
+        ...thermal.notes.map((n) => "! " + n)];
+      sections.push({ title: "熱膨脹修正", rows, notes: notes.length ? notes : ["整個溫度範圍無問題"] });
+    }
+    const rough = surfaceFinish(rec.service, rec.strictSurface);
+    sections.push({
+      title: `表面粗糙度建議（${Service[rec.service].label}${rec.strictSurface ? "，壓力脈動／氣體或真空" : ""}）`,
+      rows: rough.map((r) => [Surfaces[r.surface], roughnessText(r, rec.unit)]),
+      notes: rough.map((r) => `${Surfaces[r.surface].split("（")[0]}：${r.note}`),
+    });
+    sections.push({ title: "注意事項", rows: [], notes: [
+      "建議範圍、擠出極限、膨脹係數與表面粗糙度皆為一般工業經驗值，正式設計請以材質與密封件廠商型錄為準。",
+      "標準尺寸依 SAE AS568 與 JIS B2401 規則整理，使用前請與標準原文核對。"] });
+    const anyError = !result.isOk || (thermal && !thermal.isOk);
+    const anyWarning = result.issues.length > 0 ||
+      (thermal && (thermal.notes.length > 0 || thermal.points.some((p) => p.result.issues.length > 0)));
+    const verdict = anyError ? "ERROR" : anyWarning ? "WARNING" : "OK";
+    return { title: "O 型環溝槽設計報告", subtitle: `${rec.name}　${rec.savedAt}`, verdict, verdictLabel: Verdicts[verdict], sections };
+  }
+  function reportText(rep) {
+    const out = [rep.title, rep.subtitle, rep.verdictLabel];
+    rep.sections.forEach((s) => {
+      out.push("", `【${s.title}】`);
+      s.rows.forEach(([k, v]) => out.push(`${k}：${v}`));
+      s.notes.forEach((n) => out.push(`・${n}`));
+    });
+    return out.join("\n") + "\n";
+  }
+
   return {
     SealType, Service, Units, Standards, Media, Ratings, Materials,
+    designReport, reportText, recordGland,
     Hardness, hardnessKeys, PressureUnits, Extrusion, operating, designRing,
     Surfaces, UIN_PER_UM, surfaceFinish,
     HardwareMaterials, HOT_FILL_TARGET, thermalInput, thermalOf, thermalAt, thermalAnalyze, hotFillFactor,
@@ -916,7 +1061,7 @@ if (typeof module !== "undefined") module.exports = Core;
   }
 
   // ---- 分頁 ----
-  const tabs = [["design", "溝槽設計"], ["ring", "O型環設計"], ["sizes", "尺寸表"], ["material", "材質選擇"]];
+  const tabs = [["design", "溝槽設計"], ["ring", "O型環設計"], ["sizes", "尺寸表"], ["material", "材質選擇"], ["saved", "存檔"]];
   function renderTabs() {
     $("tabs").innerHTML = tabs.map(([k, l]) =>
       `<button role="tab" type="button" id="tabbtn-${k}" aria-controls="tab-${k}" aria-selected="${state.tab === k}" data-k="${k}">${l}</button>`).join("");
@@ -928,6 +1073,7 @@ if (typeof module !== "undefined") module.exports = Core;
     if (k === "sizes") renderSizes();
     if (k === "material") renderMaterials();
     if (k === "ring") renderRing();
+    if (k === "saved") renderSaved();
     save();
   }
 
@@ -1268,6 +1414,158 @@ if (typeof module !== "undefined") module.exports = Core;
         `<li class="${i.severity}">${p.label} ${p.tempC.toFixed(1).replace(/\.0$/, "")}°C：${esc(i.message)}</li>`)),
       ...a.notes.map((n) => `<li class="WARNING">${esc(n)}</li>`),
     ].join("");
+  }
+
+  // ---- 存檔與 PDF ----
+  let records = store.get("records", []);
+  const saveRecords = () => store.set("records", records);
+  const nowStr = () => {
+    const d = new Date(), p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const defaultName = () => (state.sizeLabel || "自訂尺寸") + "　" + Core.SealType[state.seal].label.split("（")[0];
+
+  /** 目前所有輸入組成一筆存檔；輸入無效時丟出錯誤 */
+  function currentRecord(name) {
+    Core.oring(state.mm.id, state.mm.cs);
+    currentGland();
+    const o = computeOp();
+    const th = currentThermal();
+    return {
+      name, savedAt: nowStr(), sealType: state.seal, service: state.service, unit: state.unit,
+      ringId: state.mm.id, ringCs: state.mm.cs, sizeLabel: state.sizeLabel,
+      mateDiameter: state.seal === "FACE" ? 0 : state.mm.mate, grooveDiameter: state.mm.groove,
+      grooveWidth: state.mm.width, faceDepth: state.seal === "FACE" ? state.mm.face : 0,
+      materialCode: state.material, pressureMpa: o.pressure, pressureUnit: state.pUnit, radialGap: state.gapMm,
+      hardness: state.hard === "AUTO" ? null : state.hard, backupRings: state.bak === "AUTO" ? null : Number(state.bak),
+      tMinC: th ? th.tMinC : null, tMaxC: th ? th.tMaxC : null, hardware: state.hw, strictSurface: state.sfStrict,
+    };
+  }
+
+  function showMsg(id, text, bad) { const el = $(id); el.className = "hint" + (bad ? " bad" : ""); el.textContent = text; }
+
+  $("btnSave").onclick = () => {
+    const name = $("saveName").value.trim() || defaultName();
+    try {
+      const rec = currentRecord(name);
+      // 同名覆蓋，新的排最前面
+      records = [rec, ...records.filter((r) => r.name !== name)];
+      saveRecords();
+      showMsg("saveMsg", `已儲存「${name}」，可在「存檔」分頁開啟。`);
+    } catch (e) { showMsg("saveMsg", e.message, true); }
+  };
+  $("btnPdf").onclick = (e) => {
+    try { downloadPdf(currentRecord($("saveName").value.trim() || defaultName()), e.currentTarget, "saveMsg"); }
+    catch (err) { showMsg("saveMsg", err.message, true); }
+  };
+
+  function openRecord(rec) {
+    Object.assign(state, {
+      seal: rec.sealType, service: rec.service, unit: rec.unit, sizeLabel: rec.sizeLabel, material: rec.materialCode,
+      pUnit: rec.pressureUnit, gapMm: rec.radialGap, hard: rec.hardness || "AUTO",
+      bak: rec.backupRings === null ? "AUTO" : rec.backupRings, hw: rec.hardware, sfStrict: rec.strictSurface,
+      thMin: rec.tMinC === null ? "" : Core.fmtUnit(Core.Units.MM, rec.tMinC),
+      thMax: rec.tMaxC === null ? "" : Core.fmtUnit(Core.Units.MM, rec.tMaxC),
+    });
+    const pu = Core.PressureUnits[rec.pressureUnit];
+    state.pText = rec.pressureMpa === null ? ""
+      : (rec.pressureMpa / pu.per).toFixed(pu.decimals).replace(/0+$/, "").replace(/\.$/, "");
+    Object.assign(state.mm, { id: rec.ringId, cs: rec.ringCs, groove: rec.grooveDiameter, width: rec.grooveWidth });
+    if (rec.sealType === "FACE") state.mm.face = rec.faceDepth; else state.mm.mate = rec.mateDiameter;
+    $("saveName").value = rec.name;
+    renderUnit(); renderSealControls(); renderOp(); writeFields(); renderThermalInputs();
+    renderDesign(); renderRing(); renderSurface(); save();
+    showTab("design");
+    showMsg("saveMsg", `已開啟「${rec.name}」（${rec.savedAt}）`);
+  }
+
+  function renderSaved() {
+    const list = $("savedList");
+    if (!records.length) {
+      list.innerHTML = `<p class="hint">還沒有存檔。到「溝槽設計」分頁按「儲存設計」，就會出現在這裡。</p>`;
+      return;
+    }
+    list.innerHTML = records.map((r, i) => {
+      let verdict;
+      try { verdict = Core.designReport(r).verdictLabel; } catch (e) { verdict = "無法計算"; }
+      const u = Core.Units[r.unit];
+      return `<div class="saved-card">
+        <b>${esc(r.name)}</b>
+        <span class="meta">${esc(r.savedAt)}　${esc(Core.SealType[r.sealType].label)}・${esc(Core.Service[r.service].label)}</span>
+        <span class="meta">${esc(r.sizeLabel || "自訂尺寸")}　ID ${Core.fmtUnit(u, r.ringId)} × CS ${Core.fmtUnit(u, r.ringCs)} ${u.symbol}</span>
+        <span class="meta">${esc(verdict)}</span>
+        <div class="btns">
+          <button class="btn primary" type="button" data-act="open" data-i="${i}">開啟</button>
+          <button class="btn" type="button" data-act="pdf" data-i="${i}">下載 PDF</button>
+          <button class="btn danger" type="button" data-act="del" data-i="${i}">刪除</button>
+        </div>
+      </div>`;
+    }).join("");
+  }
+  $("savedList").onclick = (e) => {
+    const b = e.target.closest("button[data-act]"); if (!b) return;
+    const rec = records[Number(b.dataset.i)]; if (!rec) return;
+    if (b.dataset.act === "open") openRecord(rec);
+    else if (b.dataset.act === "pdf") downloadPdf(rec, b, "savedMsg");
+    else if (b.dataset.act === "del") {
+      // 按兩次才刪除，避免誤觸
+      if (b.dataset.confirm) { records = records.filter((r) => r !== rec); saveRecords(); renderSaved(); showMsg("savedMsg", `已刪除「${rec.name}」`); }
+      else { b.dataset.confirm = "1"; b.textContent = "再按一次確認刪除"; }
+    }
+  };
+
+  // PDF 元件（jsPDF、html2canvas）在第一次下載時才載入
+  let pdfLibs = null;
+  const loadScript = (src) => new Promise((resolve, reject) => {
+    const el = document.createElement("script");
+    el.src = src; el.onload = resolve;
+    el.onerror = () => reject(new Error("無法載入 PDF 元件，請確認網路連線後再試一次"));
+    document.head.appendChild(el);
+  });
+  const ensurePdfLibs = () => (pdfLibs = pdfLibs || Promise.all([
+    loadScript("https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"),
+    loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"),
+  ]).catch((e) => { pdfLibs = null; throw e; }));
+
+  async function downloadPdf(rec, btn, msgId) {
+    const label = btn.textContent;
+    btn.disabled = true; btn.textContent = "產生中…";
+    const host = document.createElement("div");
+    host.className = "pdf-host";
+    try {
+      await ensurePdfLibs();
+      const rep = Core.designReport(rec);
+      const blocks = [`<div class="blk"><h1>${esc(rep.title)}</h1><div class="sub">${esc(rep.subtitle)}</div>
+        <div class="vd ${rep.verdict}">${esc(rep.verdictLabel)}</div></div>`,
+        ...rep.sections.map((sec) => `<div class="blk"><h2>${esc(sec.title)}</h2>
+          ${sec.rows.length ? `<table>${sec.rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table>` : ""}
+          ${sec.notes.length ? `<ul>${sec.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}</div>`)];
+      host.innerHTML = blocks.join("");
+      document.body.appendChild(host);
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({ unit: "pt", format: "a4" });
+      const pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight();
+      const m = 40, cw = pw - 2 * m;
+      let y = m, page = 1;
+      const footer = () => { pdf.setFontSize(8); pdf.setTextColor(120); pdf.text(`O-ring design report - ${page}`, m, ph - 20); };
+      for (const el of host.children) {
+        const canvas = await window.html2canvas(el, { scale: 2, backgroundColor: "#ffffff", logging: false });
+        const h = canvas.height * cw / canvas.width;
+        // 一個區塊放不下就換頁，避免把一段文字切成兩半
+        if (y + h > ph - m && y > m) { footer(); pdf.addPage(); page++; y = m; }
+        pdf.addImage(canvas.toDataURL("image/jpeg", 0.92), "JPEG", m, y, cw, h);
+        y += h + 4;
+      }
+      footer();
+      // 檔名只用英數字：部分瀏覽器遇到中文檔名會存成沒有副檔名的「download」
+      pdf.save(`O-ring_design_${rec.savedAt.replace(/[^0-9]/g, "").replace(/^(\d{8})(\d{4}).*/, "$1-$2")}.pdf`);
+      showMsg(msgId, `已下載「${rec.name}」的 PDF 報告。`);
+    } catch (e) {
+      showMsg(msgId, e.message || "PDF 產生失敗", true);
+    } finally {
+      host.remove();
+      btn.disabled = false; btn.textContent = label;
+    }
   }
 
   // ---- 表面粗糙度 ----

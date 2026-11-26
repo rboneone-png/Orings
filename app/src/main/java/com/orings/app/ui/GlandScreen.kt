@@ -31,7 +31,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
+import com.orings.core.DesignRecord
 import com.orings.core.Gland
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import com.orings.core.Thermal
 import com.orings.core.ThermalInput
 import com.orings.core.GlandCalculator
@@ -62,6 +68,11 @@ fun GlandScreen(
     thermalState: ThermalInputState,
     strictSurface: Boolean,
     onStrictSurfaceChange: (Boolean) -> Unit,
+    /** 儲存目前的設計 */
+    onSaveRecord: (DesignRecord) -> Unit,
+    /** 從「存檔」分頁開啟的設計 */
+    incomingRecord: DesignRecord?,
+    onRecordConsumed: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var sealType by rememberSaveable { mutableStateOf(SealType.PISTON) }
@@ -79,6 +90,9 @@ fun GlandScreen(
     var showPicker by rememberSaveable { mutableStateOf(false) }
     var thermalAnalysis by remember { mutableStateOf<Thermal.Analysis?>(null) }
     var candidates by remember { mutableStateOf<List<SizeCatalog.Candidate>?>(null) }
+    var showSaveDialog by rememberSaveable { mutableStateOf(false) }
+    val exportPdf = rememberPdfExport()
+    val context = LocalContext.current
 
     /** 解析輸入（目前單位）→ mm */
     fun d(s: String) = unit.parseToMm(s) ?: throw IllegalArgumentException("請輸入有效數字")
@@ -165,6 +179,69 @@ fun GlandScreen(
         calculate()
     }
 
+    /** 把目前所有輸入組成一筆存檔；輸入無效時丟出錯誤 */
+    fun buildRecord(name: String): DesignRecord {
+        val pressure = operatingState.pressureMpa()
+        val tMin = thermalState.tMinText.trim()
+        val tMax = thermalState.tMaxText.trim()
+        val noThermal = tMin.isEmpty() && tMax.isEmpty()
+        return DesignRecord(
+            name = name,
+            savedAt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date()),
+            sealType = sealType,
+            service = service,
+            unit = unit,
+            ringId = d(ringId),
+            ringCs = d(ringCs),
+            sizeLabel = sizeLabel,
+            mateDiameter = if (sealType == SealType.FACE) 0.0 else d(mateDia),
+            grooveDiameter = d(grooveDia),
+            grooveWidth = d(grooveWidth),
+            faceDepth = if (sealType == SealType.FACE) d(faceDepth) else 0.0,
+            materialCode = material?.code,
+            pressureMpa = pressure,
+            pressureUnit = operatingState.pressureUnit,
+            radialGap = if (pressure != null) operatingState.gapMm(unit) else (runCatching { operatingState.gapMm(unit) }.getOrNull() ?: 0.1),
+            hardness = operatingState.hardness,
+            backupRings = operatingState.backupRings,
+            tMinC = if (noThermal) null else tMin.toDoubleOrNull() ?: throw IllegalArgumentException("請輸入有效的最低溫度"),
+            tMaxC = if (noThermal) null else tMax.toDoubleOrNull() ?: throw IllegalArgumentException("請輸入有效的最高溫度"),
+            hardware = thermalState.hardware,
+            strictSurface = strictSurface,
+        ).also { it.gland } // 先驗證溝槽尺寸合理
+    }
+
+    val defaultName = (sizeLabel ?: "自訂尺寸") + "　" + sealType.label.substringBefore("（")
+
+    if (showSaveDialog) {
+        SaveDesignDialog(defaultName, onDismiss = { showSaveDialog = false }) { name ->
+            showSaveDialog = false
+            runCatching { buildRecord(name) }
+                .onSuccess {
+                    onSaveRecord(it)
+                    Toast.makeText(context, "已儲存「$name」", Toast.LENGTH_SHORT).show()
+                }
+                .onFailure { error = it.message }
+        }
+    }
+
+    // 從「存檔」分頁開啟：單位已由上層切成存檔時的單位
+    LaunchedEffect(incomingRecord) {
+        val rec = incomingRecord ?: return@LaunchedEffect
+        sealType = rec.sealType
+        ringId = rec.unit.format(rec.ringId)
+        ringCs = rec.unit.format(rec.ringCs)
+        sizeLabel = rec.sizeLabel
+        mateDia = rec.unit.format(if (rec.sealType == SealType.FACE) 26.0 else rec.mateDiameter)
+        grooveDia = rec.unit.format(rec.grooveDiameter)
+        grooveWidth = rec.unit.format(rec.grooveWidth)
+        faceDepth = rec.unit.format(if (rec.sealType == SealType.FACE) rec.faceDepth else 2.7)
+        fieldsUnit = rec.unit
+        candidates = null
+        onRecordConsumed()
+        calculate()
+    }
+
     // 從「O型環設計」分頁帶入
     LaunchedEffect(incoming) {
         val (size, g) = incoming ?: return@LaunchedEffect
@@ -242,6 +319,19 @@ fun GlandScreen(
         candidates?.let { CandidateList(it, unit, ::pickCandidate) }
         parsed?.let { ResultCard(it, unit) }
         if (parsed != null) thermalAnalysis?.let { ThermalCard(it) }
+        if (parsed != null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { showSaveDialog = true }, modifier = Modifier.weight(1f)) { Text("儲存設計") }
+                OutlinedButton(
+                    onClick = {
+                        runCatching { buildRecord(defaultName) }
+                            .onSuccess(exportPdf)
+                            .onFailure { error = it.message }
+                    },
+                    modifier = Modifier.weight(1f),
+                ) { Text("下載 PDF") }
+            }
+        }
         SurfaceFinishCard(service, unit, strictSurface, onStrictSurfaceChange)
     }
 }

@@ -73,6 +73,13 @@ Android App（Kotlin + Jetpack Compose），用來計算 O 型環溝槽的壓縮
 
 `RingDesigner.design(溝槽, …)` 依目標壓縮率與拉伸率反推理想的內徑與線徑，並依合適程度列出標準尺寸。
 
+## 存檔與 PDF 報告
+
+- `DesignRecord`：一筆溝槽設計的完整輸入（尺寸、壓力、溫度、材質、粗糙度條件）
+- `DesignReport.build(record)`：重新計算並產生報告內容；App 與網頁版共用相同文字
+- **App**：溝槽設計分頁「儲存設計」「下載 PDF」，存在手機內；「存檔」分頁可開啟、下載 PDF、刪除。PDF 以系統「儲存位置」視窗存檔
+- **網頁版**：存在瀏覽器（localStorage）；PDF 以 jsPDF＋html2canvas 產生（第一次下載時從 cdnjs 載入，需要網路）
+
 ## 熱膨脹修正
 
 `Thermal.analyze(O 型環, 溝槽, ThermalInput, …)` 把 O 型環與溝槽各自依膨脹係數換算到組裝溫度（20°C）、最低溫、最高溫，分別檢查壓縮率、拉伸率、填充率。
