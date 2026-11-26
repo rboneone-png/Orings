@@ -1,5 +1,6 @@
 package com.orings.app.ui
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -24,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -31,11 +33,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.orings.core.Gland
+import java.util.Locale
 import com.orings.core.GlandCalculator
 import com.orings.core.GlandResult
 import com.orings.core.ORing
 import com.orings.core.SealType
 import com.orings.core.Service
+import com.orings.core.SizeCatalog
+import com.orings.core.StandardSize
 import com.orings.core.Severity
 
 @Composable
@@ -51,10 +56,16 @@ fun GlandScreen() {
 
     var parsed by remember { mutableStateOf<GlandResult?>(null) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
+    var sizeLabel by rememberSaveable { mutableStateOf<String?>(null) }
+    var showPicker by rememberSaveable { mutableStateOf(false) }
+    var candidates by remember { mutableStateOf<List<SizeCatalog.Candidate>?>(null) }
 
-    fun d(s: String) = s.trim().toDoubleOrNull() ?: throw IllegalArgumentException("請輸入有效數字")
+    fun d(s: String) = s.trim().replace(",", ".").toDoubleOrNull() ?: throw IllegalArgumentException("請輸入有效數字")
 
     fun ring() = ORing(d(ringId), d(ringCs))
+
+    // 固定用 Locale.US，避免部分地區把小數點格式化成逗號後無法再解析
+    fun fmt(v: Double) = String.format(Locale.US, "%.3f", v).trimEnd('0').trimEnd('.')
 
     fun calculate() {
         runCatching {
@@ -72,11 +83,41 @@ fun GlandScreen() {
             val mate = if (sealType == SealType.FACE) 0.0 else d(mateDia)
             GlandCalculator.suggest(ring(), sealType, service, mate)
         }.onSuccess { g ->
-            grooveWidth = "%.2f".format(g.grooveWidth)
-            grooveDia = "%.2f".format(g.grooveDiameter)
-            if (sealType == SealType.FACE) faceDepth = "%.2f".format(g.faceDepth)
+            grooveWidth = fmt(g.grooveWidth)
+            grooveDia = fmt(g.grooveDiameter)
+            if (sealType == SealType.FACE) faceDepth = fmt(g.faceDepth)
             calculate()
         }.onFailure { error = it.message }
+    }
+
+
+    fun pickSize(size: StandardSize) {
+        ringId = fmt(size.innerDiameter)
+        ringCs = fmt(size.crossSection)
+        sizeLabel = size.displayName
+        showPicker = false
+    }
+
+    fun findSizes() {
+        runCatching {
+            // 端面密封以「溝槽內徑」作為配合直徑
+            val mate = if (sealType == SealType.FACE) d(grooveDia) else d(mateDia)
+            SizeCatalog.suitableFor(sealType, service, mate)
+        }.onSuccess { candidates = it; error = null }
+            .onFailure { candidates = null; error = it.message }
+    }
+
+    fun pickCandidate(c: SizeCatalog.Candidate) {
+        pickSize(c.size)
+        grooveWidth = fmt(c.gland.grooveWidth)
+        grooveDia = fmt(c.gland.grooveDiameter)
+        if (sealType == SealType.FACE) faceDepth = fmt(c.gland.faceDepth)
+        candidates = null
+        calculate()
+    }
+
+    if (showPicker) {
+        SizePickerDialog(onDismiss = { showPicker = false }, onPick = ::pickSize)
     }
 
     Scaffold { padding ->
@@ -91,7 +132,10 @@ fun GlandScreen() {
             Text("O 型環溝槽設計", style = MaterialTheme.typography.headlineSmall)
 
             Text("密封型式", style = MaterialTheme.typography.labelLarge)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 SealType.entries.forEach {
                     FilterChip(selected = sealType == it, onClick = { sealType = it }, label = { Text(it.label) })
                 }
@@ -104,8 +148,15 @@ fun GlandScreen() {
 
             Text("O 型環（mm）", style = MaterialTheme.typography.labelLarge)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                NumberField("內徑 ID", ringId, { ringId = it }, Modifier.weight(1f))
-                NumberField("線徑 CS", ringCs, { ringCs = it }, Modifier.weight(1f))
+                NumberField("內徑 ID", ringId, { ringId = it; sizeLabel = null }, Modifier.weight(1f))
+                NumberField("線徑 CS", ringCs, { ringCs = it; sizeLabel = null }, Modifier.weight(1f))
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedButton(onClick = { showPicker = true }) { Text("從尺寸表選") }
+                Text(sizeLabel ?: "自訂尺寸", style = MaterialTheme.typography.bodyMedium)
             }
 
             Text("溝槽（mm）", style = MaterialTheme.typography.labelLarge)
@@ -129,8 +180,12 @@ fun GlandScreen() {
                 Button(onClick = ::calculate, modifier = Modifier.weight(1f)) { Text("計算") }
                 OutlinedButton(onClick = ::suggest, modifier = Modifier.weight(1f)) { Text("推薦溝槽") }
             }
+            OutlinedButton(onClick = ::findSizes, modifier = Modifier.fillMaxWidth()) {
+                Text("依配合直徑找適用標準尺寸")
+            }
 
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            candidates?.let { CandidateList(it, ::pickCandidate) }
             parsed?.let { ResultCard(it) }
         }
     }

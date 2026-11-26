@@ -105,8 +105,7 @@ class GlandCalculatorTest {
 
     @Test
     fun as568Lookup() {
-        val s = As568.find("210")!!
-        val ring = s.toORing()
+        val ring = As568.find("210")!!.toORing()
         assertEquals(18.64, ring.innerDiameter, 0.01)
         assertEquals(3.53, ring.crossSection, 0.01)
         assertNull(As568.find("-999"))
