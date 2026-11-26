@@ -1,0 +1,295 @@
+package com.orings.app.ui
+
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import com.orings.core.Gland
+import com.orings.core.GlandCalculator
+import com.orings.core.GlandResult
+import com.orings.core.LengthUnit
+import com.orings.core.Material
+import com.orings.core.ORing
+import com.orings.core.SealType
+import com.orings.core.Service
+import com.orings.core.Severity
+import com.orings.core.SizeCatalog
+import com.orings.core.StandardSize
+
+/**
+ * 溝槽設計畫面。輸入欄位以 [unit] 顯示，內部計算一律換成 mm。
+ */
+@Composable
+fun GlandScreen(
+    unit: LengthUnit,
+    onUnitChange: (LengthUnit) -> Unit,
+    service: Service,
+    onServiceChange: (Service) -> Unit,
+    material: Material?,
+    modifier: Modifier = Modifier,
+) {
+    var sealType by rememberSaveable { mutableStateOf(SealType.PISTON) }
+    // 文字欄位依目前單位儲存；切換單位時一起換算
+    var ringId by rememberSaveable { mutableStateOf(unit.format(20.0)) }
+    var ringCs by rememberSaveable { mutableStateOf(unit.format(3.53)) }
+    var mateDia by rememberSaveable { mutableStateOf(unit.format(26.0)) }
+    var grooveDia by rememberSaveable { mutableStateOf(unit.format(20.5)) }
+    var grooveWidth by rememberSaveable { mutableStateOf(unit.format(4.8)) }
+    var faceDepth by rememberSaveable { mutableStateOf(unit.format(2.7)) }
+
+    var parsed by remember { mutableStateOf<GlandResult?>(null) }
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
+    var sizeLabel by rememberSaveable { mutableStateOf<String?>(null) }
+    var showPicker by rememberSaveable { mutableStateOf(false) }
+    var candidates by remember { mutableStateOf<List<SizeCatalog.Candidate>?>(null) }
+
+    /** 解析輸入（目前單位）→ mm */
+    fun d(s: String) = unit.parseToMm(s) ?: throw IllegalArgumentException("請輸入有效數字")
+
+    /** mm → 目前單位的文字 */
+    fun fmt(mm: Double) = unit.format(mm)
+
+    fun ring() = ORing(d(ringId), d(ringCs))
+
+    fun changeUnit(newUnit: LengthUnit) {
+        if (newUnit == unit) return
+        ringId = newUnit.convertText(ringId, unit)
+        ringCs = newUnit.convertText(ringCs, unit)
+        mateDia = newUnit.convertText(mateDia, unit)
+        grooveDia = newUnit.convertText(grooveDia, unit)
+        grooveWidth = newUnit.convertText(grooveWidth, unit)
+        faceDepth = newUnit.convertText(faceDepth, unit)
+        onUnitChange(newUnit)
+    }
+
+    fun calculate() {
+        runCatching {
+            val gland = when (sealType) {
+                SealType.FACE -> Gland(sealType, d(grooveWidth), d(grooveDia), faceDepth = d(faceDepth))
+                else -> Gland(sealType, d(grooveWidth), d(grooveDia), d(mateDia))
+            }
+            GlandCalculator.calculate(ring(), gland, service)
+        }.onSuccess { parsed = it; error = null }
+            .onFailure { parsed = null; error = it.message }
+    }
+
+    fun suggest() {
+        runCatching {
+            val mate = if (sealType == SealType.FACE) 0.0 else d(mateDia)
+            GlandCalculator.suggest(ring(), sealType, service, mate)
+        }.onSuccess { g ->
+            grooveWidth = fmt(g.grooveWidth)
+            grooveDia = fmt(g.grooveDiameter)
+            if (sealType == SealType.FACE) faceDepth = fmt(g.faceDepth)
+            calculate()
+        }.onFailure { error = it.message }
+    }
+
+    fun pickSize(size: StandardSize) {
+        ringId = fmt(size.innerDiameter)
+        ringCs = fmt(size.crossSection)
+        sizeLabel = size.displayName
+        showPicker = false
+    }
+
+    fun findSizes() {
+        runCatching {
+            // 端面密封以「溝槽內徑」作為配合直徑
+            val mate = if (sealType == SealType.FACE) d(grooveDia) else d(mateDia)
+            SizeCatalog.suitableFor(sealType, service, mate)
+        }.onSuccess { candidates = it; error = null }
+            .onFailure { candidates = null; error = it.message }
+    }
+
+    fun pickCandidate(c: SizeCatalog.Candidate) {
+        pickSize(c.size)
+        grooveWidth = fmt(c.gland.grooveWidth)
+        grooveDia = fmt(c.gland.grooveDiameter)
+        if (sealType == SealType.FACE) faceDepth = fmt(c.gland.faceDepth)
+        candidates = null
+        calculate()
+    }
+
+    if (showPicker) {
+        SizePickerDialog(unit = unit, onDismiss = { showPicker = false }, onPick = ::pickSize)
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        ChipRow(LengthUnit.entries, unit, { it.label }, ::changeUnit)
+
+        Text("密封型式", style = MaterialTheme.typography.labelLarge)
+        ChipRow(SealType.entries, sealType, { it.label }) { sealType = it }
+        ChipRow(Service.entries, service, { it.label }, onServiceChange)
+
+        MaterialBanner(material, service)
+
+        Text("O 型環（${unit.symbol}）", style = MaterialTheme.typography.labelLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            NumberField("內徑 ID", ringId, { ringId = it; sizeLabel = null }, Modifier.weight(1f))
+            NumberField("線徑 CS", ringCs, { ringCs = it; sizeLabel = null }, Modifier.weight(1f))
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedButton(onClick = { showPicker = true }) { Text("從尺寸表選") }
+            Text(sizeLabel ?: "自訂尺寸", style = MaterialTheme.typography.bodyMedium)
+        }
+
+        Text("溝槽（${unit.symbol}）", style = MaterialTheme.typography.labelLarge)
+        when (sealType) {
+            SealType.PISTON -> {
+                NumberField("缸筒內徑", mateDia, { mateDia = it })
+                NumberField("溝槽底徑（活塞上）", grooveDia, { grooveDia = it })
+            }
+            SealType.ROD -> {
+                NumberField("軸桿外徑", mateDia, { mateDia = it })
+                NumberField("溝槽底徑（殼體內）", grooveDia, { grooveDia = it })
+            }
+            SealType.FACE -> {
+                NumberField("溝槽內徑", grooveDia, { grooveDia = it })
+                NumberField("溝槽深度", faceDepth, { faceDepth = it })
+            }
+        }
+        NumberField("溝槽寬度", grooveWidth, { grooveWidth = it })
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = ::calculate, modifier = Modifier.weight(1f)) { Text("計算") }
+            OutlinedButton(onClick = ::suggest, modifier = Modifier.weight(1f)) { Text("推薦溝槽") }
+        }
+        OutlinedButton(onClick = ::findSizes, modifier = Modifier.fillMaxWidth()) {
+            Text("依配合直徑找適用標準尺寸")
+        }
+
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        candidates?.let { CandidateList(it, unit, ::pickCandidate) }
+        parsed?.let { ResultCard(it, unit) }
+    }
+}
+
+@Composable
+fun <T> ChipRow(items: List<T>, selected: T, label: (T) -> String, onSelect: (T) -> Unit) {
+    Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items.forEach {
+            FilterChip(selected = it == selected, onClick = { onSelect(it) }, label = { Text(label(it)) })
+        }
+    }
+}
+
+/** 顯示目前選用的材質；動態使用但材質不適合時提醒 */
+@Composable
+private fun MaterialBanner(material: Material?, service: Service) {
+    val text = when {
+        material == null -> "材質：未選擇（到「材質選擇」分頁挑選）"
+        service == Service.DYNAMIC && !material.dynamicOk -> "材質：${material.label}　! 不適合動態使用"
+        else -> "材質：${material.label}　${material.tempMinC}～${material.tempMaxC}°C"
+    }
+    val warn = material != null && service == Service.DYNAMIC && !material.dynamicOk
+    Text(
+        text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = if (warn) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun NumberField(
+    label: String,
+    value: String,
+    onChange: (String) -> Unit,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        label = { Text(label) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun ResultCard(r: GlandResult, unit: LengthUnit) {
+    val ok = r.isOk && r.issues.isEmpty()
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = when {
+                !r.isOk -> MaterialTheme.colorScheme.errorContainer
+                ok -> Color(0xFFDDF3E4)
+                else -> Color(0xFFFFF1CC)
+            },
+        ),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                when {
+                    !r.isOk -> "✗ 設計不合格"
+                    ok -> "✓ 設計合格"
+                    else -> "! 可用，但有警告"
+                },
+                fontWeight = FontWeight.Bold,
+            )
+            ResultRow("溝槽深度", "${unit.format(r.depth)} ${unit.symbol}")
+            ResultRow("有效線徑", "${unit.format(r.effectiveCrossSection)} ${unit.symbol}")
+            ResultRow(
+                "壓縮率",
+                "%.1f%%（建議 %.0f–%.0f%%）".format(
+                    r.compression * 100, r.limits.minCompression * 100, r.limits.maxCompression * 100,
+                ),
+            )
+            ResultRow("拉伸率", "%.1f%%（建議 ≤ %.0f%%）".format(r.stretch * 100, r.limits.maxStretch * 100))
+            ResultRow("填充率", "%.1f%%（建議 ≤ %.0f%%）".format(r.fill * 100, r.limits.maxFill * 100))
+            r.issues.forEach {
+                Text(
+                    (if (it.severity == Severity.ERROR) "✗ " else "! ") + it.message,
+                    color = if (it.severity == Severity.ERROR) MaterialTheme.colorScheme.error else Color(0xFF8A5A00),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResultRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label)
+        Text(value, fontWeight = FontWeight.Medium)
+    }
+}
