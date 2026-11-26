@@ -104,6 +104,10 @@ data class GlandResult(
     val fill: Double,
     val limits: DesignLimits,
     val issues: List<Issue>,
+    /** 扣除擋圈後的溝槽寬度 */
+    val effectiveWidth: Double = 0.0,
+    /** 擠出極限（MPa）；未提供使用條件時為 null */
+    val extrusionLimit: Double? = null,
 ) {
     val isOk: Boolean get() = issues.none { it.severity == Severity.ERROR }
 }

@@ -163,6 +163,12 @@ tr.pick:hover td { background: var(--accent-soft); }
 .chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); }
 
 .note-foot { font-size: .8rem; color: var(--muted); }
+.sub { font-size: .8rem; color: var(--muted); }
+.hint { font-size: .84rem; color: var(--muted); }
+.hint.bad { color: var(--bad); }
+.hint b { color: var(--ink); font-weight: 600; }
+.lede { margin: 0; color: var(--muted); font-size: .92rem; }
+.metric .v.sm { font-size: 1.1rem; }
 .mat-line { font-size: .88rem; color: var(--muted); }
 .mat-line.bad { color: var(--bad); }
 @media (prefers-reduced-motion: no-preference) { .btn, .chip, .seg button { transition: background-color .15s, border-color .15s; } }
@@ -216,6 +222,8 @@ tr.pick:hover td { background: var(--accent-soft); }
           </div>
         </div>
 
+        <div class="group" id="op-d"></div>
+
         <div class="group" id="candBox" hidden>
           <h2>適用的標準尺寸</h2>
           <div class="table-wrap" style="max-height:340px">
@@ -237,6 +245,45 @@ tr.pick:hover td { background: var(--accent-soft); }
         <dl class="facts" id="facts"></dl>
         <ul class="issues" id="issues"></ul>
         <div class="error" id="err" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- O型環設計 -->
+  <section id="tab-ring" role="tabpanel" hidden>
+    <div class="grid">
+      <div class="panel">
+        <p class="lede">輸入現有溝槽，反推合適的 O 型環尺寸與硬度，並列出可直接採用的標準尺寸。</p>
+        <div class="group">
+          <h2>密封型式</h2>
+          <div class="seg" role="group" aria-label="密封型式" id="rsealSeg"></div>
+          <div class="seg" role="group" aria-label="使用條件" id="serviceSeg3"></div>
+        </div>
+        <div class="group">
+          <h2>現有溝槽</h2>
+          <div class="fields">
+            <div class="field" id="rw-mate"><label for="r-mate" id="rl-mate">缸筒內徑</label><div class="input"><input id="r-mate" inputmode="decimal"><span class="unit u"></span></div></div>
+            <div class="field"><label for="r-groove" id="rl-groove">溝槽底徑</label><div class="input"><input id="r-groove" inputmode="decimal"><span class="unit u"></span></div></div>
+            <div class="field" id="rw-face"><label for="r-face">溝槽深度</label><div class="input"><input id="r-face" inputmode="decimal"><span class="unit u"></span></div></div>
+            <div class="field"><label for="r-width">溝槽寬度</label><div class="input"><input id="r-width" inputmode="decimal"><span class="unit u"></span></div></div>
+          </div>
+        </div>
+        <div class="group" id="op-r"></div>
+      </div>
+
+      <div class="panel" aria-live="polite">
+        <div id="rVerdict" class="verdict"></div>
+        <div class="metrics" id="rIdeal"></div>
+        <dl class="facts" id="rFacts"></dl>
+        <ul class="issues" id="rIssues"></ul>
+        <div class="error" id="rErr" hidden></div>
+        <h2>合適的標準尺寸</h2>
+        <div class="table-wrap" style="max-height:420px">
+          <table>
+            <thead><tr><th>規格</th><th style="text-align:right">ID × CS</th><th style="text-align:right">壓縮</th><th style="text-align:right">拉伸</th><th style="text-align:right">填充</th><th>狀態</th><th></th></tr></thead>
+            <tbody id="rBody"></tbody>
+          </table>
+        </div>
       </div>
     </div>
   </section>
@@ -327,6 +374,51 @@ const Core = (() => {
   }
 
   const HARD_MAX_COMPRESSION = 0.40, HARD_MAX_STRETCH = 0.08, TARGET_FILL = 0.75;
+  const MAX_LOOSE_PISTON = 0.03, MAX_LOOSE_ROD = 0.05;
+  const num = (v) => v.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+
+  // ---- 硬度與擠出極限（與 Kotlin Extrusion 相同的近似值） ----
+  const Hardness = { A70: { key: "A70", label: "70A" }, A80: { key: "A80", label: "80A" }, A90: { key: "A90", label: "90A" } };
+  const hardnessKeys = ["A70", "A80", "A90"];
+  const PressureUnits = {
+    MPA: { key: "MPA", label: "MPa", per: 1, decimals: 3 },
+    BAR: { key: "BAR", label: "bar", per: 0.1, decimals: 2 },
+    PSI: { key: "PSI", label: "psi", per: 0.006894757, decimals: 1 },
+  };
+  const Extrusion = (() => {
+    const gaps = [0.05, 0.10, 0.15, 0.20, 0.25];
+    const limits = { A70: [10, 6, 4, 2.5, 1.5], A80: [16, 10, 7, 5, 3.5], A90: [25, 16, 11, 8, 5.5] };
+    const BACKUP_LIMIT = 35, WARN = 0.8;
+    function maxPressure(h, gap, backups = 0) {
+      if (backups > 0) return BACKUP_LIMIT;
+      const t = limits[h];
+      if (gap <= gaps[0]) return t[0];
+      if (gap >= gaps[4]) return t[4] * gaps[4] / gap;
+      let i = 0;
+      for (let k = 0; k < gaps.length; k++) if (gaps[k] <= gap) i = k;
+      const f = (gap - gaps[i]) / (gaps[i + 1] - gaps[i]);
+      return t[i] + (t[i + 1] - t[i]) * f;
+    }
+    function recommend(p, gap) {
+      for (const h of hardnessKeys) {
+        const lim = maxPressure(h, gap);
+        if (p <= lim * WARN || (h === "A90" && p <= lim)) {
+          return { hardness: h, needsBackup: false, maxPressure: lim,
+            reason: `壓力 ${num(p)} MPa，間隙 ${num(gap)} mm 時 ${Hardness[h].label} 可承受約 ${num(lim)} MPa` };
+        }
+      }
+      return p <= BACKUP_LIMIT
+        ? { hardness: "A90", needsBackup: true, maxPressure: BACKUP_LIMIT, reason: "壓力超過無擋圈的擠出極限，建議 90A 並加擋圈（或縮小間隙）" }
+        : { hardness: null, needsBackup: true, maxPressure: BACKUP_LIMIT, reason: `壓力超過 ${num(BACKUP_LIMIT)} MPa，一般 O 型環不適用，請改用其他密封件` };
+    }
+    const backupThickness = (cs) => (cs >= 2.0 ? 1.4 : 1.0);
+    return { maxPressure, recommend, backupThickness, BACKUP_LIMIT, WARN };
+  })();
+  function operating(pressureMpa, radialGap, hardness, backupRings = 0) {
+    if (pressureMpa < 0) throw new Error("壓力不能是負數");
+    if (radialGap < 0) throw new Error("擠出間隙不能是負數");
+    return { pressureMpa, radialGap, hardness, backupRings };
+  }
 
   function stretch(ring, g) {
     const seat = g.type === "ROD" ? g.mate : g.grooveDia;
@@ -334,11 +426,14 @@ const Core = (() => {
   }
   const effCs = (cs, s) => (s > 0 ? cs / Math.sqrt(1 + s) : cs);
 
-  function calculate(ring, g, service = "STATIC", limits = limitsFor(g.type, service)) {
+  function calculate(ring, g, service = "STATIC", limits = limitsFor(g.type, service), op = null) {
     const depth = g.depth, s = stretch(ring, g), cs = effCs(ring.cs, s);
     const compression = (cs - depth) / cs;
     const area = Math.PI * cs * cs / 4;
-    const fill = area / (depth * g.width);
+    const backups = op ? op.backupRings : 0;
+    const effWidth = g.width - backups * Extrusion.backupThickness(ring.cs);
+    const fill = effWidth > 0 ? area / (depth * effWidth) : Infinity;
+    const extLimit = op ? Extrusion.maxPressure(op.hardness, op.radialGap, op.backupRings) : null;
     const issues = [];
     const add = (severity, code, message) => issues.push({ severity, code, message });
     if (compression <= 0) add("ERROR", "NO_SQUEEZE", "沒有壓縮量，無法密封");
@@ -348,22 +443,34 @@ const Core = (() => {
 
     if (s > HARD_MAX_STRETCH) add("ERROR", "OVER_STRETCH", `拉伸率 ${pct(s)} 過高，線徑變細且加速老化`);
     else if (s > limits.maxS) add("WARNING", "HIGH_STRETCH", `拉伸率 ${pct(s)} 高於建議上限 ${pct(limits.maxS)}`);
+    else if (s < -MAX_LOOSE_PISTON && g.type === "PISTON") add("ERROR", "VERY_LOOSE_RING", `O 型環內徑比溝槽底徑大 ${pct(-s)}，裝不穩，請選內徑較小的尺寸`);
+    else if (s < -MAX_LOOSE_ROD && g.type === "ROD") add("ERROR", "VERY_LOOSE_RING", `O 型環內徑比軸徑大 ${pct(-s)}，外徑會被溝槽擠壓起皺，請選內徑較小的尺寸`);
     else if (s < 0 && g.type === "PISTON") add("WARNING", "LOOSE_RING", "O 型環內徑大於溝槽底徑，安裝時可能鬆脫或扭轉");
 
-    if (g.width < cs) add("ERROR", "NARROW_GROOVE", "溝槽寬度小於線徑，O 型環放不進去");
+    if (effWidth < cs) add("ERROR", "NARROW_GROOVE", backups > 0 ? "扣除擋圈後的溝槽寬度小於線徑，O 型環與擋圈放不進去" : "溝槽寬度小於線徑，O 型環放不進去");
     if (fill > 1.0) add("ERROR", "OVERFILL", `填充率 ${pct(fill)} 超過 100%，溝槽空間不足`);
     else if (fill > limits.maxF) add("ERROR", "HIGH_FILL", `填充率 ${pct(fill)} 高於上限 ${pct(limits.maxF)}，膨脹或熱脹時會擠壞`);
 
-    return { depth, stretch: s, cs, compression, fill, limits, issues, isOk: !issues.some((i) => i.severity === "ERROR") };
+    if (op) {
+      const p = op.pressureMpa, h = Hardness[op.hardness].label;
+      if (p > extLimit) add("ERROR", "EXTRUSION", `壓力 ${num(p)} MPa 超過 ${h} 的擠出極限約 ${num(extLimit)} MPa，請提高硬度、縮小間隙或加擋圈`);
+      else if (p > extLimit * Extrusion.WARN) add("WARNING", "NEAR_EXTRUSION", `壓力已達 ${h} 擠出極限（約 ${num(extLimit)} MPa）的 ${pct(p / extLimit)}，餘裕不足`);
+      if (op.hardness === "A90" && p < 2.0 && backups === 0) add("WARNING", "HARD_LOW_PRESSURE", "壓力低於 2 MPa 時 90A 密封性較差，建議 70A");
+      if (op.hardness === "A90" && compression > 0.25) add("WARNING", "HARD_HIGH_SQUEEZE", "90A 壓縮率超過 25%，安裝力大且易永久變形");
+    }
+
+    return { depth, stretch: s, cs, compression, fill, limits, issues, effWidth, extLimit,
+      isOk: !issues.some((i) => i.severity === "ERROR") };
   }
 
-  function suggest(ring, type, service = "STATIC", mate = 0, limits = limitsFor(type, service)) {
+  function suggest(ring, type, service = "STATIC", mate = 0, limits = limitsFor(type, service), op = null) {
     const target = (limits.minC + limits.maxC) / 2;
+    const backupWidth = (op ? op.backupRings : 0) * Extrusion.backupThickness(ring.cs);
     const dims = (s) => {
       const cs = effCs(ring.cs, s);
       const depth = cs * (1 - target);
       const width = Math.max(Math.PI * cs * cs / 4 / (depth * TARGET_FILL), cs * 1.05);
-      return [depth, width];
+      return [depth, width + backupWidth];
     };
     if (type === "PISTON") {
       if (!(mate > 0)) throw new Error("請輸入缸筒內徑");
@@ -520,6 +627,34 @@ const Core = (() => {
     return best.sort((a, b) => Math.abs(a.result.stretch - target) - Math.abs(b.result.stretch - target));
   }
 
+  // ---- O 型環設計（已知溝槽反推） ----
+  function designRing(g, service = "STATIC", pressure = null, gap = 0.1, hardness = null, backups = null,
+                      standards = Object.keys(Standards), limit = 10) {
+    const limits = limitsFor(g.type, service);
+    const tc = (limits.minC + limits.maxC) / 2;
+    const ts = g.type === "ROD" ? 0 : limits.maxS / 2;
+    const rec = pressure === null ? null : Extrusion.recommend(pressure, gap);
+    const op = pressure === null ? null : operating(pressure, gap,
+      hardness || (rec && rec.hardness) || "A90",
+      backups !== null ? backups : (rec && rec.needsBackup ? 1 : 0));
+    const seat = g.type === "ROD" ? g.mate : g.grooveDia;
+    const idealId = seat / (1 + ts);
+    const idealCs = g.depth / (1 - tc) * Math.sqrt(1 + ts);
+    const idealResult = calculate(oring(idealId, idealCs), g, service, limits, op);
+    const matches = allSizes
+      .filter((sz) => standards.includes(sz.standard) && !isPortSeal(sz) && okForService(sz, service))
+      .map((sz) => {
+        const r = calculate(oring(sz.id, sz.cs), g, service, limits, op);
+        const score = r.issues.filter((i) => i.severity === "WARNING").length * 1.0 +
+          Math.abs(r.compression - tc) * 10 + Math.abs(r.stretch - ts) * 10;
+        return { size: sz, result: r, score };
+      })
+      .filter((m) => m.result.isOk)
+      .sort((a, b) => a.score - b.score)
+      .slice(0, limit);
+    return { idealId, idealCs, idealResult, tc, ts, rec, op, matches };
+  }
+
   // ---- 材質 ----
   const Media = {
     MINERAL_OIL: "礦物油／液壓油", FUEL: "汽油／燃油", WATER_STEAM: "熱水／蒸汽", OZONE_WEATHER: "臭氧／戶外耐候",
@@ -562,6 +697,7 @@ const Core = (() => {
 
   return {
     SealType, Service, Units, Standards, Media, Ratings, Materials,
+    Hardness, hardnessKeys, PressureUnits, Extrusion, operating, designRing,
     oring, gland, limitsFor, calculate, suggest, fmtUnit, parseUnit,
     as568, jis, allSizes, displayName, findSize, search, suitableFor, evaluate, matLabel, pct,
   };
@@ -594,10 +730,21 @@ if (typeof module !== "undefined") module.exports = Core;
     tMax: store.get("tMax", "80"),
     media: store.get("media", ["MINERAL_OIL"]),
     stds: store.get("stds", Object.keys(Core.Standards)),
+    // 壓力條件（兩個設計分頁共用）
+    pUnit: store.get("pUnit", "MPA"),
+    pText: store.get("pText", ""),
+    gapMm: store.get("gapMm", 0.1),
+    hard: store.get("hard", "AUTO"),
+    bak: store.get("bak", "AUTO"),
+    // O型環設計分頁的溝槽
+    rseal: store.get("rseal", "PISTON"),
+    rmm: Object.assign({ mate: 26.0, groove: 20.5, width: 4.8, face: 2.7 }, store.get("rmm", {})),
   };
+  const ringFieldIds = { mate: "r-mate", groove: "r-groove", width: "r-width", face: "r-face" };
   const fieldIds = { id: "f-id", cs: "f-cs", mate: "f-mate", groove: "f-groove", width: "f-width", face: "f-face" };
   const unit = () => Core.Units[state.unit];
-  const save = () => ["tab", "unit", "seal", "service", "mm", "sizeLabel", "material", "tMin", "tMax", "media", "stds"].forEach((k) => store.set(k, state[k]));
+  const save = () => ["tab", "unit", "seal", "service", "mm", "sizeLabel", "material", "tMin", "tMax", "media", "stds",
+    "pUnit", "pText", "gapMm", "hard", "bak", "rseal", "rmm"].forEach((k) => store.set(k, state[k]));
 
   function segment(el, items, current, onPick) {
     el.innerHTML = items.map(([k, label]) =>
@@ -606,7 +753,7 @@ if (typeof module !== "undefined") module.exports = Core;
   }
 
   // ---- 分頁 ----
-  const tabs = [["design", "溝槽設計"], ["sizes", "尺寸表"], ["material", "材質選擇"]];
+  const tabs = [["design", "溝槽設計"], ["ring", "O型環設計"], ["sizes", "尺寸表"], ["material", "材質選擇"]];
   function renderTabs() {
     $("tabs").innerHTML = tabs.map(([k, l]) =>
       `<button role="tab" type="button" id="tabbtn-${k}" aria-controls="tab-${k}" aria-selected="${state.tab === k}" data-k="${k}">${l}</button>`).join("");
@@ -617,13 +764,14 @@ if (typeof module !== "undefined") module.exports = Core;
     state.tab = k; renderTabs();
     if (k === "sizes") renderSizes();
     if (k === "material") renderMaterials();
+    if (k === "ring") renderRing();
     save();
   }
 
   // ---- 單位 ----
   function renderUnit() {
     segment($("unitSeg"), [["MM", "公制 mm"], ["INCH", "英制 inch"]], state.unit, (k) => {
-      state.unit = k; writeFields(); renderUnit(); renderDesign(); if (state.tab === "sizes") renderSizes(); save();
+      state.unit = k; writeFields(); renderUnit(); renderDesign(); renderRing(); if (state.tab === "sizes") renderSizes(); save();
     });
     document.querySelectorAll(".u").forEach((s) => { s.textContent = unit().symbol; });
   }
@@ -633,6 +781,14 @@ if (typeof module !== "undefined") module.exports = Core;
       if (k === except) continue;
       $(id).value = Core.fmtUnit(unit(), state.mm[k]);
     }
+    for (const [k, id] of Object.entries(ringFieldIds)) {
+      if ("r-" + k === except) continue;
+      $(id).value = Core.fmtUnit(unit(), state.rmm[k]);
+    }
+    ["d", "r"].forEach((px) => {
+      if (px + "-gap" !== except) $(px + "-gap").value = Core.fmtUnit(unit(), state.gapMm);
+      if (px + "-p" !== except) $(px + "-p").value = state.pText;
+    });
   }
 
   // ---- 溝槽設計 ----
@@ -650,7 +806,75 @@ if (typeof module !== "undefined") module.exports = Core;
     $("l-groove").textContent = state.seal === "PISTON" ? "溝槽底徑（活塞上）" : state.seal === "ROD" ? "溝槽底徑（殼體內）" : "溝槽內徑";
   }
   function setService(k) {
-    state.service = k; renderSealControls(); renderDesign(); if (state.tab === "material") renderMaterials(); save();
+    state.service = k; renderSealControls(); renderDesign(); renderRing(); if (state.tab === "material") renderMaterials(); save();
+  }
+
+  // ---- 壓力、硬度、擋圈（兩個設計分頁共用） ----
+  function opMarkup(px) {
+    return `
+      <h2>壓力與硬度</h2>
+      <div class="seg" role="group" aria-label="壓力單位" id="${px}-punit"></div>
+      <div class="fields">
+        <div class="field"><label for="${px}-p">工作壓力（留空則不檢查擠出）</label><div class="input"><input id="${px}-p" inputmode="decimal" placeholder="例如 10"><span class="unit" id="${px}-pu"></span></div></div>
+        <div class="field"><label for="${px}-gap">擠出間隙（單邊）</label><div class="input"><input id="${px}-gap" inputmode="decimal"><span class="unit u"></span></div></div>
+      </div>
+      <span class="sub">硬度（Shore A）</span>
+      <div class="seg" role="group" aria-label="硬度" id="${px}-hard"></div>
+      <span class="sub">擋圈</span>
+      <div class="seg" role="group" aria-label="擋圈" id="${px}-bak"></div>
+      <div class="hint" id="${px}-rec"></div>
+      <p class="note-foot">擠出極限為一般經驗值（靜態、室溫），正式設計請以廠商擠出曲線為準。</p>`;
+  }
+  ["d", "r"].forEach((px) => {
+    $("op-" + px).innerHTML = opMarkup(px);
+    $(px + "-p").addEventListener("input", (e) => { state.pText = e.target.value; writeFields(px + "-p"); afterOpChange(); });
+    $(px + "-gap").addEventListener("input", (e) => {
+      const v = Core.parseUnit(unit(), e.target.value);
+      if (v !== null && v >= 0) state.gapMm = v;
+      writeFields(px + "-gap"); afterOpChange();
+    });
+    $(px + "-gap").addEventListener("blur", () => writeFields());
+  });
+  function afterOpChange() { renderOp(); renderDesign(); renderRing(); save(); }
+
+  /** 依輸入組出使用條件；未輸入壓力時 op 為 null，輸入無效時丟出錯誤 */
+  function computeOp() {
+    const t = String(state.pText).trim().replace(",", ".");
+    if (t === "") return { op: null, rec: null, pressure: null };
+    if (!/^\d*\.?\d+$|^\d+\.$/.test(t)) throw new Error(`壓力「${state.pText}」不是有效數字`);
+    const p = Number(t) * Core.PressureUnits[state.pUnit].per;
+    const rec = Core.Extrusion.recommend(p, state.gapMm);
+    const hardness = state.hard === "AUTO" ? (rec.hardness || "A90") : state.hard;
+    const backups = state.bak === "AUTO" ? (rec.needsBackup ? 1 : 0) : Number(state.bak);
+    return { op: Core.operating(p, state.gapMm, hardness, backups), rec, pressure: p };
+  }
+
+  function renderOp() {
+    let rec = null;
+    try { rec = computeOp().rec; } catch (e) { rec = null; }
+    const hardItems = [["AUTO", "自動" + (rec && rec.hardness ? `（${Core.Hardness[rec.hardness].label}）` : "")],
+      ...Core.hardnessKeys.map((h) => [h, Core.Hardness[h].label])];
+    const bakItems = [["AUTO", "自動" + (rec ? (rec.needsBackup ? "（單側）" : "（不用）") : "")], ["0", "不用"], ["1", "單側"], ["2", "雙側"]];
+    const pUnits = Object.values(Core.PressureUnits).map((u) => [u.key, u.label]);
+    ["d", "r"].forEach((px) => {
+      segment($(px + "-punit"), pUnits, state.pUnit, (k) => {
+        // 換壓力單位時，數值一起換算
+        const t = String(state.pText).trim().replace(",", ".");
+        if (t !== "" && !isNaN(Number(t))) {
+          const mpa = Number(t) * Core.PressureUnits[state.pUnit].per;
+          const nu = Core.PressureUnits[k];
+          state.pText = (mpa / nu.per).toFixed(nu.decimals).replace(/0+$/, "").replace(/\.$/, "");
+        }
+        state.pUnit = k; writeFields(); afterOpChange();
+      });
+      $(px + "-pu").textContent = Core.PressureUnits[state.pUnit].label;
+      segment($(px + "-hard"), hardItems, state.hard, (k) => { state.hard = k; afterOpChange(); });
+      segment($(px + "-bak"), bakItems, String(state.bak), (k) => { state.bak = k === "AUTO" ? "AUTO" : Number(k); afterOpChange(); });
+      const el = $(px + "-rec");
+      if (!rec) { el.className = "hint"; el.textContent = "輸入工作壓力後，會依擠出間隙推薦硬度並檢查擠出。"; return; }
+      el.className = "hint" + (rec.hardness ? "" : " bad");
+      el.innerHTML = `建議：<b>${rec.hardness ? "Shore " + Core.Hardness[rec.hardness].label : "不適用 O 型環"}${rec.needsBackup && rec.hardness ? " + 擋圈" : ""}</b>。${esc(rec.reason)}`;
+    });
   }
 
   function onField(k, e) {
@@ -691,11 +915,12 @@ if (typeof module !== "undefined") module.exports = Core;
     const tag = $("sizeTag");
     tag.innerHTML = state.sizeLabel ? `目前：<b>${esc(state.sizeLabel)}</b>` : "目前：自訂尺寸";
     const err = $("err");
-    let res, ring, g;
+    let res, ring, g, op = null;
     try {
       ring = Core.oring(state.mm.id, state.mm.cs);
       g = currentGland();
-      res = Core.calculate(ring, g, state.service);
+      op = computeOp().op;
+      res = Core.calculate(ring, g, state.service, Core.limitsFor(g.type, state.service), op);
     } catch (e) {
       err.hidden = false; err.textContent = e.message;
       $("verdict").className = "verdict bad"; $("verdict").textContent = "無法計算";
@@ -722,26 +947,41 @@ if (typeof module !== "undefined") module.exports = Core;
       ["拉伸後有效線徑", f(res.cs)],
       ["O 型環外徑 OD", f(ring.od)],
       ["溝槽截面積", (res.depth * g.width / (u.per * u.per)).toFixed(u === Core.Units.MM ? 2 : 5) + " " + u.symbol + "²"],
+      ...(op ? [
+        ["硬度／擋圈", `${Core.Hardness[op.hardness].label}／${["不用", "單側", "雙側"][op.backupRings]}`],
+        ["擠出極限", res.extLimit.toFixed(1) + " MPa"],
+        ["工作壓力", (op.pressureMpa).toFixed(2) + " MPa"],
+        ...(op.backupRings ? [["扣擋圈後溝槽寬", f(res.effWidth)]] : []),
+      ] : []),
     ].map(([k, val]) => `<dt>${k}</dt><dd>${esc(val)}</dd>`).join("");
     $("issues").innerHTML = res.issues.map((i) => `<li class="${i.severity}">${esc(i.message)}</li>`).join("");
-    drawSection(res, g);
+    drawSection(res, g, op ? op.backupRings : 0, ring.cs);
   }
 
   // 截面示意：溝槽寬 × 深依比例；壓縮後的 O 型環用等面積橢圓近似
-  function drawSection(res, g) {
+  function drawSection(res, g, backups = 0, rawCs = res.cs) {
     const svg = $("diagram");
     const W = g.width, D = res.depth, cs = res.cs;
     const k = Math.min(110 / W, 80 / Math.max(D, cs));
     const Wp = W * k, Dp = D * k, top = 46, x0 = (240 - Wp) / 2, bottom = top + Dp;
     const labels = { PISTON: ["缸筒", "活塞"], ROD: ["軸桿", "殼體"], FACE: ["壓蓋", "本體"] }[g.type];
+    // 擋圈：單側畫在右邊（低壓側），雙側兩邊都畫；O 型環置於剩下空間的中間
+    const bt = Core.Extrusion.backupThickness(rawCs) * k;
+    const leftB = backups >= 2 ? bt : 0, rightB = backups >= 1 ? bt : 0;
+    const cx = x0 + leftB + (Wp - leftB - rightB) / 2;
+    const backupRects = [
+      leftB ? `<rect x="${x0}" y="${top}" width="${leftB}" height="${Dp}" fill="var(--accent)" opacity=".55"/>` : "",
+      rightB ? `<rect x="${x0 + Wp - rightB}" y="${top}" width="${rightB}" height="${Dp}" fill="var(--accent)" opacity=".55"/>` : "",
+    ].join("");
     let ring;
     if (res.compression > 0) {
       const ry = Dp / 2, rx = Math.pow(cs * k / 2, 2) / ry;
-      ring = `<ellipse cx="${x0 + Wp / 2}" cy="${top + ry}" rx="${rx}" ry="${ry}" fill="var(--rubber)"/>`;
+      ring = `<ellipse cx="${cx}" cy="${top + ry}" rx="${rx}" ry="${ry}" fill="var(--rubber)"/>`;
     } else {
       const rr = cs * k / 2;
-      ring = `<circle cx="${x0 + Wp / 2}" cy="${bottom - rr}" r="${rr}" fill="var(--rubber)"/>`;
+      ring = `<circle cx="${cx}" cy="${bottom - rr}" r="${rr}" fill="var(--rubber)"/>`;
     }
+    ring = backupRects + ring;
     const h = Math.max(bottom + 34, 150);
     const u = unit(), n = (mm) => Core.fmtUnit(u, mm);
     svg.setAttribute("viewBox", `0 0 240 ${h}`);
@@ -763,7 +1003,8 @@ if (typeof module !== "undefined") module.exports = Core;
   $("btnSuggest").onclick = () => {
     try {
       const ring = Core.oring(state.mm.id, state.mm.cs);
-      const g = Core.suggest(ring, state.seal, state.service, state.seal === "FACE" ? 0 : state.mm.mate);
+      const g = Core.suggest(ring, state.seal, state.service, state.seal === "FACE" ? 0 : state.mm.mate,
+        Core.limitsFor(state.seal, state.service), computeOp().op);
       state.mm.width = g.width; state.mm.groove = g.grooveDia;
       if (state.seal === "FACE") state.mm.face = g.faceDepth;
       writeFields(); renderDesign(); save();
@@ -800,6 +1041,93 @@ if (typeof module !== "undefined") module.exports = Core;
     writeFields(); renderDesign(); save();
   };
   $("goSizes").onclick = () => showTab("sizes");
+
+  // ---- O型環設計（已知溝槽反推） ----
+  function renderRingControls() {
+    segment($("rsealSeg"), sealItems, state.rseal, (k) => { state.rseal = k; renderRingControls(); renderRing(); save(); });
+    segment($("serviceSeg3"), serviceItems, state.service, setService);
+    const face = state.rseal === "FACE";
+    $("rw-mate").hidden = face;
+    $("rw-face").hidden = !face;
+    $("rl-mate").textContent = state.rseal === "ROD" ? "軸桿外徑" : "缸筒內徑";
+    $("rl-groove").textContent = state.rseal === "PISTON" ? "溝槽底徑（活塞上）" : state.rseal === "ROD" ? "溝槽底徑（殼體內）" : "溝槽內徑";
+  }
+  Object.entries(ringFieldIds).forEach(([k, id]) => {
+    $(id).addEventListener("input", (e) => {
+      const v = Core.parseUnit(unit(), e.target.value);
+      if (v !== null) state.rmm[k] = v;
+      renderRing(v === null ? `「${e.target.value}」不是有效數字` : null);
+      save();
+    });
+    $(id).addEventListener("blur", () => writeFields());
+  });
+
+  function ringGland() {
+    const m = state.rmm;
+    return state.rseal === "FACE"
+      ? Core.gland("FACE", m.width, m.groove, 0, m.face)
+      : Core.gland(state.rseal, m.width, m.groove, m.mate);
+  }
+
+  let ringMatches = [];
+  function renderRing(inputError) {
+    const err = $("rErr");
+    let g, d, o;
+    try {
+      g = ringGland();
+      o = computeOp();
+      d = Core.designRing(g, state.service, o.pressure, state.gapMm,
+        state.hard === "AUTO" ? null : state.hard, state.bak === "AUTO" ? null : Number(state.bak));
+    } catch (e) {
+      err.hidden = false; err.textContent = e.message;
+      $("rVerdict").className = "verdict bad"; $("rVerdict").textContent = "無法計算";
+      ["rIdeal", "rFacts", "rIssues", "rBody"].forEach((id) => { $(id).innerHTML = ""; });
+      return;
+    }
+    err.hidden = !inputError; err.textContent = inputError || "";
+    ringMatches = d.matches;
+    const u = unit(), n = (mm) => Core.fmtUnit(u, mm);
+    const v = $("rVerdict");
+    const clean = d.matches.filter((m) => m.result.issues.length === 0).length;
+    if (!d.matches.length) { v.className = "verdict bad"; v.textContent = "✗ 沒有可用的標準尺寸，請調整溝槽、硬度或加擋圈"; }
+    else if (!clean) { v.className = "verdict warn"; v.textContent = `! 找到 ${d.matches.length} 個可用尺寸，但都有警告`; }
+    else { v.className = "verdict ok"; v.textContent = `✓ 找到 ${clean} 個完全合格的標準尺寸`; }
+
+    const hardTxt = d.op ? Core.Hardness[d.op.hardness].label + (d.op.backupRings ? " + 擋圈" : "") : "未輸入壓力";
+    $("rIdeal").innerHTML = [
+      ["理想內徑 ID", `${n(d.idealId)} <small>${u.symbol}</small>`],
+      ["理想線徑 CS", `${n(d.idealCs)} <small>${u.symbol}</small>`],
+      ["硬度", hardTxt],
+    ].map(([k, val]) => `<div class="metric"><span class="k">${k}</span><span class="v sm">${val}</span></div>`).join("");
+    $("rFacts").innerHTML = [
+      ["溝槽深度", n(g.depth) + " " + u.symbol],
+      ["目標壓縮率", (d.tc * 100).toFixed(1) + "%"],
+      ["目標拉伸率", (d.ts * 100).toFixed(1) + "%"],
+      ["理想尺寸填充率", (d.idealResult.fill * 100).toFixed(1) + "%"],
+      ...(d.op ? [["擠出極限", d.idealResult.extLimit.toFixed(1) + " MPa"]] : []),
+    ].map(([k, val]) => `<dt>${k}</dt><dd>${esc(val)}</dd>`).join("");
+    $("rIssues").innerHTML = d.idealResult.issues.map((i) => `<li class="${i.severity}">理想尺寸：${esc(i.message)}</li>`).join("");
+    $("rBody").innerHTML = d.matches.length ? d.matches.map((m, i) => {
+      const w = m.result.issues.length;
+      return `<tr class="pick" data-i="${i}">
+        <td><b>${esc(Core.displayName(m.size))}</b></td>
+        <td class="n">${n(m.size.id)} × ${n(m.size.cs)}</td>
+        <td class="n">${Core.pct(m.result.compression)}</td>
+        <td class="n">${Core.pct(m.result.stretch)}</td>
+        <td class="n">${Core.pct(m.result.fill)}</td>
+        <td>${w ? `<span class="pill FAIR" title="${esc(m.result.issues.map((x) => x.message).join("；"))}">${w} 項警告</span>` : `<span class="pill GOOD">合格</span>`}</td>
+        <td><button class="row-btn" type="button" data-i="${i}">帶入</button></td>
+      </tr>`;
+    }).join("") : `<tr><td colspan="7">沒有可用的標準尺寸</td></tr>`;
+  }
+  $("rBody").onclick = (e) => {
+    const row = e.target.closest("[data-i]"); if (!row) return;
+    const m = ringMatches[Number(row.dataset.i)]; if (!m) return;
+    state.seal = state.rseal;
+    Object.assign(state.mm, state.rmm, { id: m.size.id, cs: m.size.cs });
+    state.sizeLabel = Core.displayName(m.size);
+    writeFields(); renderSealControls(); renderDesign(); showTab("design");
+  };
 
   // ---- 尺寸表 ----
   function renderStdChips() {
@@ -880,7 +1208,7 @@ if (typeof module !== "undefined") module.exports = Core;
 
   // ---- 初始化 ----
   $("t-min").value = state.tMin; $("t-max").value = state.tMax;
-  renderUnit(); renderTabs(); renderSealControls(); writeFields(); renderDesign();
+  renderUnit(); renderTabs(); renderSealControls(); renderRingControls(); renderOp(); writeFields(); renderDesign(); renderRing();
   renderStdChips(); renderMediaChips();
   if (state.tab === "sizes") renderSizes();
   if (state.tab === "material") renderMaterials();
