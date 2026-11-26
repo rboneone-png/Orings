@@ -92,6 +92,25 @@ class ThermalTest {
         assertEquals(plain, cold)
     }
 
+    @Test
+    fun ringDesign_thermalExcludesAndRanks() {
+        val g = Gland(SealType.PISTON, 4.8, 20.5, 26.0)
+        val plain = RingDesigner.design(g)
+        assertTrue(plain.idealThermal == null && plain.matches.all { it.thermal == null })
+
+        // 矽橡膠 + 鋁殼 -60～200°C：比較嚴苛，有些尺寸會被排除
+        val hard = ThermalInput.of(-60.0, 200.0, Materials.find("VMQ"), HardwareMaterial.ALUMINUM)
+        val d = RingDesigner.design(g, thermal = hard, material = Materials.find("VMQ"), limit = 50)
+        assertTrue(d.idealThermal != null)
+        assertTrue(d.matches.all { it.thermal!!.isOk })
+        assertEquals(d.matches.map { it.score }.sorted(), d.matches.map { it.score })
+        val plainAll = RingDesigner.design(g, limit = 50)
+        assertTrue(d.matches.size <= plainAll.matches.size)
+        // 每個被保留的尺寸，在無溫度時也一定合格
+        val plainCodes = RingDesigner.design(g, limit = 1000).matches.map { it.size.code }.toSet()
+        assertTrue(d.matches.all { it.size.code in plainCodes })
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun invertedRangeRejected() {
         ThermalInput(100.0, 0.0, 1.3e-4, 11.5e-6)

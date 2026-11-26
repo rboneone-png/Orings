@@ -20,6 +20,9 @@ Android App（Kotlin + Jetpack Compose），用來計算 O 型環溝槽的壓縮
 
 發佈新版本：在 Actions 頁面執行「Release APK」並輸入版本號，或推送 `v*` 標籤。
 
+> 從 v0.4.1 起 APK 使用專案內固定的除錯簽章（`app/debug.keystore`），之後的版本都能直接覆蓋更新。
+> v0.4.0 以前的版本每次簽章都不同，第一次升級到 v0.4.1 需先解除安裝舊版。
+
 ## 開始
 
 1. 用 Android Studio 開啟本資料夾（會自動建立 `local.properties`），按 Run。

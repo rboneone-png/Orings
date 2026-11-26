@@ -32,7 +32,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.orings.core.Gland
-import com.orings.core.HardwareMaterial
 import com.orings.core.Thermal
 import com.orings.core.ThermalInput
 import com.orings.core.GlandCalculator
@@ -60,6 +59,9 @@ fun GlandScreen(
     /** 從「O型環設計」分頁帶入的尺寸與溝槽 */
     incoming: Pair<StandardSize, Gland>?,
     onIncomingConsumed: () -> Unit,
+    thermalState: ThermalInputState,
+    strictSurface: Boolean,
+    onStrictSurfaceChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var sealType by rememberSaveable { mutableStateOf(SealType.PISTON) }
@@ -75,10 +77,6 @@ fun GlandScreen(
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     var sizeLabel by rememberSaveable { mutableStateOf<String?>(null) }
     var showPicker by rememberSaveable { mutableStateOf(false) }
-    var strictSurface by rememberSaveable { mutableStateOf(false) }
-    var tMinText by rememberSaveable { mutableStateOf("-20") }
-    var tMaxText by rememberSaveable { mutableStateOf("80") }
-    var hardware by rememberSaveable { mutableStateOf(HardwareMaterial.STEEL) }
     var thermalAnalysis by remember { mutableStateOf<Thermal.Analysis?>(null) }
     var candidates by remember { mutableStateOf<List<SizeCatalog.Candidate>?>(null) }
 
@@ -92,10 +90,7 @@ fun GlandScreen(
 
     /** 溫度欄位空白時不做熱膨脹修正；輸入無效時丟出錯誤 */
     fun thermalInput(): ThermalInput? {
-        if (tMinText.isBlank() && tMaxText.isBlank()) return null
-        val lo = tMinText.trim().toDoubleOrNull() ?: throw IllegalArgumentException("請輸入有效的最低溫度")
-        val hi = tMaxText.trim().toDoubleOrNull() ?: throw IllegalArgumentException("請輸入有效的最高溫度")
-        return ThermalInput.of(lo, hi, material, hardware)
+        return thermalState.input(material)
     }
 
     // 單位在最上方切換；欄位文字記錄自己是用哪個單位寫的，單位改變時一起換算
@@ -233,10 +228,7 @@ fun GlandScreen(
 
         OperatingSection(operatingState, unit)
 
-        ThermalInputSection(
-            tMinText, { tMinText = it }, tMaxText, { tMaxText = it },
-            hardware, { hardware = it }, material,
-        )
+        ThermalInputSection(thermalState, material)
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = ::calculate, modifier = Modifier.weight(1f)) { Text("計算") }
@@ -250,7 +242,7 @@ fun GlandScreen(
         candidates?.let { CandidateList(it, unit, ::pickCandidate) }
         parsed?.let { ResultCard(it, unit) }
         if (parsed != null) thermalAnalysis?.let { ThermalCard(it) }
-        SurfaceFinishCard(service, unit, strictSurface) { strictSurface = it }
+        SurfaceFinishCard(service, unit, strictSurface, onStrictSurfaceChange)
     }
 }
 

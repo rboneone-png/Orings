@@ -35,6 +35,8 @@ fun OringsApp() {
     var materialCode by rememberSaveable { mutableStateOf<String?>(null) }
     val material = materialCode?.let(Materials::find)
     val operatingState = rememberSaveable(saver = OperatingInputState.Saver) { OperatingInputState() }
+    val thermalState = rememberSaveable(saver = ThermalInputState.Saver) { ThermalInputState() }
+    var strictSurface by rememberSaveable { mutableStateOf(false) }
     // 「O型環設計」點選的尺寸，帶到「溝槽設計」
     var pendingPick by remember { mutableStateOf<Pair<StandardSize, Gland>?>(null) }
     // 切換分頁時保留各分頁的輸入內容
@@ -63,6 +65,9 @@ fun OringsApp() {
                         operatingState = operatingState,
                         incoming = pendingPick,
                         onIncomingConsumed = { pendingPick = null },
+                        thermalState = thermalState,
+                        strictSurface = strictSurface,
+                        onStrictSurfaceChange = { strictSurface = it },
                     )
                     1 -> RingDesignScreen(
                         unit = unit,
@@ -70,6 +75,10 @@ fun OringsApp() {
                         onServiceChange = { service = it },
                         operatingState = operatingState,
                         onPick = { size, gland -> pendingPick = size to gland; tab = 0 },
+                        material = material,
+                        thermalState = thermalState,
+                        strictSurface = strictSurface,
+                        onStrictSurfaceChange = { strictSurface = it },
                     )
                     else -> MaterialScreen(
                         service = service,

@@ -18,6 +18,18 @@ android {
         versionName = (findProperty("appVersionName") as String?) ?: "0.1.0"
     }
 
+    // 固定的除錯簽章：GitHub Actions 每次都在新機器上編譯，若用自動產生的金鑰，
+    // 每個版本簽章都不同，手機會因「套件衝突」拒絕覆蓋安裝。
+    // 這是公開的除錯金鑰（密碼 android），只供測試安裝；上架 Google Play 需另設正式金鑰。
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
