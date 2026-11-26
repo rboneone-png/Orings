@@ -32,6 +32,8 @@ data class Material(
     val dynamicOk: Boolean,
     /** 相對成本 1（便宜）~ 5（昂貴） */
     val relativeCost: Int,
+    /** 線膨脹係數（1/°C，近似值） */
+    val cte: Double,
     val resistance: Map<Medium, Rating>,
     val note: String,
 ) {
@@ -61,47 +63,47 @@ object Materials {
 
     val all: List<Material> = listOf(
         Material(
-            "NBR", "丁腈橡膠", -30, 100, dynamicOk = true, relativeCost = 1,
+            "NBR", "丁腈橡膠", -30, 100, dynamicOk = true, relativeCost = 1, cte = 1.3e-4,
             resistance = r(G, G, F, P, P, P, F, P),
             note = "最常用、便宜；耐油佳，不耐臭氧與日照",
         ),
         Material(
-            "HNBR", "氫化丁腈橡膠", -30, 150, dynamicOk = true, relativeCost = 3,
+            "HNBR", "氫化丁腈橡膠", -30, 150, dynamicOk = true, relativeCost = 3, cte = 1.3e-4,
             resistance = r(G, G, G, F, P, P, F, P),
             note = "NBR 強化版，耐溫、耐磨、耐熱水較好",
         ),
         Material(
-            "FKM", "氟橡膠（Viton®）", -20, 200, dynamicOk = true, relativeCost = 3,
+            "FKM", "氟橡膠（Viton®）", -20, 200, dynamicOk = true, relativeCost = 3, cte = 1.6e-4,
             resistance = r(G, G, F, G, P, P, G, P),
             note = "耐高溫、耐油與燃油；不耐酮類、煞車油與蒸汽",
         ),
         Material(
-            "EPDM", "三元乙丙橡膠", -50, 150, dynamicOk = true, relativeCost = 1,
+            "EPDM", "三元乙丙橡膠", -50, 150, dynamicOk = true, relativeCost = 1, cte = 1.6e-4,
             resistance = r(P, P, G, G, G, G, G, G),
             note = "耐水、蒸汽、煞車油、耐候；遇礦物油會膨脹",
         ),
         Material(
-            "VMQ", "矽橡膠", -60, 200, dynamicOk = false, relativeCost = 2,
+            "VMQ", "矽橡膠", -60, 200, dynamicOk = false, relativeCost = 2, cte = 2.5e-4,
             resistance = r(F, P, F, G, F, P, F, F),
             note = "溫度範圍最寬、食品級常用；強度與耐磨差，只適合靜態",
         ),
         Material(
-            "FVMQ", "氟矽橡膠", -60, 175, dynamicOk = false, relativeCost = 4,
+            "FVMQ", "氟矽橡膠", -60, 175, dynamicOk = false, relativeCost = 4, cte = 2.2e-4,
             resistance = r(G, G, F, G, P, P, F, P),
             note = "耐低溫又耐燃油（航太常用）；強度差，只適合靜態",
         ),
         Material(
-            "CR", "氯丁橡膠（Neoprene）", -40, 100, dynamicOk = true, relativeCost = 1,
+            "CR", "氯丁橡膠（Neoprene）", -40, 100, dynamicOk = true, relativeCost = 1, cte = 1.4e-4,
             resistance = r(F, P, F, G, P, P, F, P),
             note = "耐候、耐冷媒；耐油中等",
         ),
         Material(
-            "AU", "聚氨酯（PU）", -30, 80, dynamicOk = true, relativeCost = 2,
+            "AU", "聚氨酯（PU）", -30, 80, dynamicOk = true, relativeCost = 2, cte = 1.5e-4,
             resistance = r(G, F, P, G, P, P, P, P),
             note = "耐磨與抗擠出最好，適合高壓液壓；不耐熱水（水解）",
         ),
         Material(
-            "FFKM", "全氟橡膠", -15, 300, dynamicOk = true, relativeCost = 5,
+            "FFKM", "全氟橡膠", -15, 300, dynamicOk = true, relativeCost = 5, cte = 2.3e-4,
             resistance = r(G, G, G, G, G, G, G, G),
             note = "幾乎耐所有化學品與高溫；價格極高",
         ),

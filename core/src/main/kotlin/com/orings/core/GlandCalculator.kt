@@ -1,6 +1,7 @@
 package com.orings.core
 
 import kotlin.math.PI
+import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.round
 import kotlin.math.sqrt
@@ -163,6 +164,7 @@ object GlandCalculator {
         mateDiameter: Double = 0.0,
         limits: DesignLimits = DesignLimits.defaultFor(sealType, service),
         operating: Operating? = null,
+        thermal: ThermalInput? = null,
     ): Gland {
         val targetCompression = (limits.minCompression + limits.maxCompression) / 2
         // 擋圈佔用的寬度要另外加上
@@ -175,7 +177,17 @@ object GlandCalculator {
             return depth to (width + backupWidth)
         }
 
-        return when (sealType) {
+        // 高溫時 O 型環膨脹比溝槽多，填充率上升：用實際高溫計算的填充率回推所需寬度
+        fun widenForHeat(g: Gland): Gland {
+            if (thermal == null || thermal.tMaxC <= thermal.assemblyC) return g
+            val (hotRing, hotGland) = Thermal.at(ring, g, thermal, thermal.tMaxC)
+            val hotFill = calculate(hotRing, hotGland, service, limits, operating).fill
+            if (hotFill <= Thermal.HOT_FILL_TARGET) return g
+            val width = (g.grooveWidth - backupWidth) * hotFill / Thermal.HOT_FILL_TARGET + backupWidth
+            return g.copy(grooveWidth = ceil(width * 100) / 100)
+        }
+
+        val gland = when (sealType) {
             SealType.PISTON -> {
                 require(mateDiameter > 0) { "請輸入缸筒內徑" }
                 // 溝槽底徑會影響拉伸率，拉伸率又影響有效線徑，迭代幾次收斂
@@ -202,6 +214,7 @@ object GlandCalculator {
                 Gland(sealType, round2(width), ring.innerDiameter, faceDepth = round2(depth))
             }
         }
+        return widenForHeat(gland)
     }
 
     private fun round2(v: Double) = round(v * 100) / 100
