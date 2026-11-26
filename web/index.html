@@ -247,6 +247,18 @@ tr.pick:hover td { background: var(--accent-soft); }
         <dl class="facts" id="facts"></dl>
         <ul class="issues" id="issues"></ul>
         <div class="error" id="err" hidden></div>
+        <div class="group">
+          <h2 id="sfTitle">表面粗糙度建議</h2>
+          <div class="chips"><button class="chip" type="button" id="sfStrict" aria-pressed="false">壓力脈動／氣體或真空</button></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>表面</th><th style="text-align:right">Ra</th><th style="text-align:right">Rz</th></tr></thead>
+              <tbody id="sfBody"></tbody>
+            </table>
+          </div>
+          <p class="note-foot" id="sfNotes"></p>
+          <p class="note-foot">一般密封件廠商設計指引的經驗值，正式設計請以廠商型錄為準。</p>
+        </div>
       </div>
     </div>
   </section>
@@ -629,6 +641,27 @@ const Core = (() => {
     return best.sort((a, b) => Math.abs(a.result.stretch - target) - Math.abs(b.result.stretch - target));
   }
 
+  // ---- 表面粗糙度建議（與 Kotlin SurfaceFinish 相同，單位 µm） ----
+  const Surfaces = {
+    CONTACT: "配合面（O 型環接觸／滑動的面）",
+    GROOVE_BOTTOM: "溝槽底面",
+    GROOVE_FLANK: "溝槽側面",
+  };
+  const UIN_PER_UM = 39.37;
+  function surfaceFinish(service, strict = false) {
+    const row = (surface, raMin, raMax, rzMax, note) => ({ surface, raMin, raMax, rzMax, note });
+    if (service === "DYNAMIC") return [
+      row("CONTACT", 0.1, 0.4, 1.6, "滑動面；材料支承率 Mr > 50%（深度 0.5·Rz 處）。太光滑（Ra < 0.1）留不住油膜，摩擦反而變大"),
+      row("GROOVE_BOTTOM", null, strict ? 0.8 : 1.6, strict ? 3.2 : 6.3, "不滑動，但 O 型環會在上面微動"),
+      row("GROOVE_FLANK", null, strict ? 1.6 : 3.2, strict ? 6.3 : 10.0, "壓力脈動時 O 型環會在側面來回移動"),
+    ];
+    return [
+      row("CONTACT", null, strict ? 0.8 : 1.6, strict ? 3.2 : 6.3, strict ? "壓力脈動或氣體、真空密封，需較細的表面" : "一般液體、穩定壓力"),
+      row("GROOVE_BOTTOM", null, 1.6, 6.3, "與 O 型環接觸的靜態面"),
+      row("GROOVE_FLANK", null, strict ? 1.6 : 3.2, strict ? 6.3 : 10.0, "壓力脈動時 O 型環會在側面來回移動"),
+    ];
+  }
+
   // ---- O 型環設計（已知溝槽反推） ----
   function designRing(g, service = "STATIC", pressure = null, gap = 0.1, hardness = null, backups = null,
                       standards = Object.keys(Standards), limit = 10) {
@@ -700,6 +733,7 @@ const Core = (() => {
   return {
     SealType, Service, Units, Standards, Media, Ratings, Materials,
     Hardness, hardnessKeys, PressureUnits, Extrusion, operating, designRing,
+    Surfaces, UIN_PER_UM, surfaceFinish,
     oring, gland, limitsFor, calculate, suggest, fmtUnit, parseUnit,
     as568, jis, allSizes, displayName, findSize, search, suitableFor, evaluate, matLabel, pct,
   };
@@ -740,13 +774,14 @@ if (typeof module !== "undefined") module.exports = Core;
     bak: store.get("bak", "AUTO"),
     // O型環設計分頁的溝槽
     rseal: store.get("rseal", "PISTON"),
+    sfStrict: store.get("sfStrict", false),
     rmm: Object.assign({ mate: 26.0, groove: 20.5, width: 4.8, face: 2.7 }, store.get("rmm", {})),
   };
   const ringFieldIds = { mate: "r-mate", groove: "r-groove", width: "r-width", face: "r-face" };
   const fieldIds = { id: "f-id", cs: "f-cs", mate: "f-mate", groove: "f-groove", width: "f-width", face: "f-face" };
   const unit = () => Core.Units[state.unit];
   const save = () => ["tab", "unit", "seal", "service", "mm", "sizeLabel", "material", "tMin", "tMax", "media", "stds",
-    "pUnit", "pText", "gapMm", "hard", "bak", "rseal", "rmm"].forEach((k) => store.set(k, state[k]));
+    "pUnit", "pText", "gapMm", "hard", "bak", "rseal", "rmm", "sfStrict"].forEach((k) => store.set(k, state[k]));
 
   function segment(el, items, current, onPick) {
     el.innerHTML = items.map(([k, label]) =>
@@ -773,7 +808,7 @@ if (typeof module !== "undefined") module.exports = Core;
   // ---- 單位 ----
   function renderUnit() {
     segment($("unitSeg"), [["MM", "公制 mm"], ["INCH", "英制 inch"]], state.unit, (k) => {
-      state.unit = k; writeFields(); renderUnit(); renderDesign(); renderRing(); if (state.tab === "sizes") renderSizes(); save();
+      state.unit = k; writeFields(); renderUnit(); renderDesign(); renderRing(); renderSurface(); if (state.tab === "sizes") renderSizes(); save();
     });
     document.querySelectorAll(".u").forEach((s) => { s.textContent = unit().symbol; });
   }
@@ -808,7 +843,7 @@ if (typeof module !== "undefined") module.exports = Core;
     $("l-groove").textContent = state.seal === "PISTON" ? "溝槽底徑（活塞上）" : state.seal === "ROD" ? "溝槽底徑（殼體內）" : "溝槽內徑";
   }
   function setService(k) {
-    state.service = k; renderSealControls(); renderDesign(); renderRing(); if (state.tab === "material") renderMaterials(); save();
+    state.service = k; renderSealControls(); renderDesign(); renderRing(); renderSurface(); if (state.tab === "material") renderMaterials(); save();
   }
 
   // ---- 壓力、硬度、擋圈（兩個設計分頁共用） ----
@@ -1044,6 +1079,21 @@ if (typeof module !== "undefined") module.exports = Core;
   };
   $("goSizes").onclick = () => showTab("sizes");
 
+  // ---- 表面粗糙度 ----
+  function renderSurface() {
+    const mm = state.unit === "MM", sym = mm ? "µm" : "µin";
+    const v = (um) => mm ? um.toFixed(1) : (um * Core.UIN_PER_UM).toFixed(0);
+    const rows = Core.surfaceFinish(state.service, state.sfStrict);
+    $("sfTitle").textContent = `表面粗糙度建議（${Core.Service[state.service].label}）`;
+    $("sfStrict").setAttribute("aria-pressed", String(state.sfStrict));
+    $("sfBody").innerHTML = rows.map((r) => `<tr>
+      <td>${esc(Core.Surfaces[r.surface])}</td>
+      <td class="n">${r.raMin !== null ? `${v(r.raMin)}–${v(r.raMax)}` : `≤ ${v(r.raMax)}`} ${sym}</td>
+      <td class="n">≤ ${v(r.rzMax)} ${sym}</td></tr>`).join("");
+    $("sfNotes").innerHTML = rows.map((r) => `<b>${esc(Core.Surfaces[r.surface].replace(/（.*）/, ""))}</b>：${esc(r.note)}`).join("<br>");
+  }
+  $("sfStrict").onclick = () => { state.sfStrict = !state.sfStrict; renderSurface(); save(); };
+
   // ---- O型環設計（已知溝槽反推） ----
   function renderRingControls() {
     segment($("rsealSeg"), sealItems, state.rseal, (k) => { state.rseal = k; renderRingControls(); renderRing(); save(); });
@@ -1210,7 +1260,7 @@ if (typeof module !== "undefined") module.exports = Core;
 
   // ---- 初始化 ----
   $("t-min").value = state.tMin; $("t-max").value = state.tMax;
-  renderUnit(); renderTabs(); renderSealControls(); renderRingControls(); renderOp(); writeFields(); renderDesign(); renderRing();
+  renderUnit(); renderTabs(); renderSealControls(); renderRingControls(); renderOp(); writeFields(); renderDesign(); renderRing(); renderSurface();
   renderStdChips(); renderMediaChips();
   if (state.tab === "sizes") renderSizes();
   if (state.tab === "material") renderMaterials();

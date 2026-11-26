@@ -71,6 +71,7 @@ fun GlandScreen(
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     var sizeLabel by rememberSaveable { mutableStateOf<String?>(null) }
     var showPicker by rememberSaveable { mutableStateOf(false) }
+    var strictSurface by rememberSaveable { mutableStateOf(false) }
     var candidates by remember { mutableStateOf<List<SizeCatalog.Candidate>?>(null) }
 
     /** 解析輸入（目前單位）→ mm */
@@ -218,6 +219,7 @@ fun GlandScreen(
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         candidates?.let { CandidateList(it, unit, ::pickCandidate) }
         parsed?.let { ResultCard(it, unit) }
+        SurfaceFinishCard(service, unit, strictSurface) { strictSurface = it }
     }
 }
 
