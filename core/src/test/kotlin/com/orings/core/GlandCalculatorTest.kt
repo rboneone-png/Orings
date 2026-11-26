@@ -82,6 +82,20 @@ class GlandCalculatorTest {
     }
 
     @Test
+    fun looseRing_warnsThenErrors() {
+        val g = Gland(SealType.PISTON, 4.8, 20.5, 26.0)
+        // 內徑大 1%：只警告
+        assertTrue("LOOSE_RING" in codes(GlandCalculator.calculate(ORing(20.7, 3.53), g)))
+        // 內徑大 19%：錯誤
+        val r = GlandCalculator.calculate(ORing(24.4, 3.1), g)
+        assertTrue("VERY_LOOSE_RING" in codes(r))
+        assertFalse(r.isOk)
+        // 軸桿：內徑比軸徑大 10%
+        val rod = Gland(SealType.ROD, 3.6, 24.2, 20.0)
+        assertTrue("VERY_LOOSE_RING" in codes(GlandCalculator.calculate(ORing(22.0, 2.62), rod)))
+    }
+
+    @Test
     fun narrowGroove_isError() {
         val ring = ORing(20.0, 3.53)
         val gland = Gland(SealType.FACE, grooveWidth = 3.0, grooveDiameter = 20.0, faceDepth = 2.7)

@@ -24,6 +24,12 @@ object GlandCalculator {
     /** 拉伸率超過此值直接判定為錯誤 */
     const val HARD_MAX_STRETCH = 0.08
 
+    /** 活塞密封：O 型環內徑比溝槽底徑大超過此比例即判定裝不穩 */
+    const val MAX_LOOSE_PISTON = 0.03
+
+    /** 軸桿密封：O 型環內徑比軸徑大超過此比例即判定會起皺 */
+    const val MAX_LOOSE_ROD = 0.05
+
     /** 推薦設計時的目標填充率 */
     const val TARGET_FILL = 0.75
 
@@ -79,6 +85,12 @@ object GlandCalculator {
                 )
                 stretch > limits.maxStretch -> add(
                     Issue(Severity.WARNING, "HIGH_STRETCH", "拉伸率 ${pct(stretch)} 高於建議上限 ${pct(limits.maxStretch)}")
+                )
+                stretch < -MAX_LOOSE_PISTON && gland.sealType == SealType.PISTON -> add(
+                    Issue(Severity.ERROR, "VERY_LOOSE_RING", "O 型環內徑比溝槽底徑大 ${pct(-stretch)}，裝不穩，請選內徑較小的尺寸")
+                )
+                stretch < -MAX_LOOSE_ROD && gland.sealType == SealType.ROD -> add(
+                    Issue(Severity.ERROR, "VERY_LOOSE_RING", "O 型環內徑比軸徑大 ${pct(-stretch)}，外徑會被溝槽擠壓起皺，請選內徑較小的尺寸")
                 )
                 stretch < 0 && gland.sealType == SealType.PISTON -> add(
                     Issue(Severity.WARNING, "LOOSE_RING", "O 型環內徑大於溝槽底徑，安裝時可能鬆脫或扭轉")

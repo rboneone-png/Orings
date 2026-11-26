@@ -148,6 +148,8 @@ class HardnessAndDesignTest {
         assertEquals(d.matches.map { it.score }.sorted(), d.matches.map { it.score })
         // 溝槽深 2.75 → 應選線徑 3.5 左右的尺寸
         assertTrue(d.matches.first().size.crossSection in 3.3..3.6)
+        // 不會推薦內徑比溝槽大很多的尺寸
+        assertTrue(d.matches.all { it.result.stretch >= -GlandCalculator.MAX_LOOSE_PISTON })
     }
 
     @Test
