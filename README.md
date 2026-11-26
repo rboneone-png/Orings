@@ -4,6 +4,8 @@ Android App（Kotlin + Jetpack Compose），用來計算 O 型環溝槽的壓縮
 
 ## 專案結構
 
+另有網頁版：`web/index.html`（直接用瀏覽器開啟即可，不需安裝），計算邏輯與 `core` 一致。
+
 | 模組 | 內容 | 建置需求 |
 |---|---|---|
 | `core/` | 純 Kotlin 計算核心＋單元測試 | 只需 JDK 17+ |

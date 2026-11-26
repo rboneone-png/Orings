@@ -1,0 +1,891 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>[hidden]{display:none!important}body{margin:0;font-size:14px}</style></head><body>
+<title>O型環設計</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* 版面：頂部工具列（分頁＋單位）→ 左輸入、右結果與截面圖的雙欄；手機改單欄 */
+:root {
+  --bg: #eef2f4;
+  --surface: #ffffff;
+  --surface-2: #f6f8f9;
+  --ink: #16212a;
+  --muted: #566672;
+  --line: #d3dce1;
+  --accent: #0b6a85;
+  --accent-ink: #ffffff;
+  --accent-soft: #dcecf1;
+  --ok: #1b7444;
+  --ok-bg: #e2f2e8;
+  --warn: #8f5a00;
+  --warn-bg: #fbf0d6;
+  --bad: #b3261e;
+  --bad-bg: #f9e1df;
+  --steel: #c3cfd6;
+  --steel-2: #a9b8c1;
+  --rubber: #1f2428;
+  --font-ui: "IBM Plex Sans", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --font-num: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1519; --surface: #172026; --surface-2: #1d272e; --ink: #e4ebef; --muted: #96a6b0;
+    --line: #2c3a43; --accent: #4fb3cf; --accent-ink: #06222b; --accent-soft: #173842;
+    --ok: #63c48d; --ok-bg: #16301f; --warn: #e2b04f; --warn-bg: #352a12; --bad: #f08a80; --bad-bg: #3a1a18;
+    --steel: #3b4a53; --steel-2: #4a5b66; --rubber: #0a0c0d;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1519; --surface: #172026; --surface-2: #1d272e; --ink: #e4ebef; --muted: #96a6b0;
+  --line: #2c3a43; --accent: #4fb3cf; --accent-ink: #06222b; --accent-soft: #173842;
+  --ok: #63c48d; --ok-bg: #16301f; --warn: #e2b04f; --warn-bg: #352a12; --bad: #f08a80; --bad-bg: #3a1a18;
+  --steel: #3b4a53; --steel-2: #4a5b66; --rubber: #0a0c0d;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 32px;
+}
+.wrap { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: .01em; text-wrap: balance; }
+h2 { font-size: .8rem; font-weight: 600; margin: 0; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+
+header.bar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg);
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
+  padding-block: 14px 12px; border-bottom: 1px solid var(--line);
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.brand { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.brand small { color: var(--muted); font-size: .8rem; }
+
+.seg { display: inline-flex; align-self: flex-start; max-width: 100%; background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 3px; gap: 2px; flex-wrap: wrap; }
+.seg button {
+  font: inherit; font-size: .88rem; border: 0; background: transparent; color: var(--muted);
+  padding: 6px 14px; border-radius: 9px; cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.seg button:focus-visible, .btn:focus-visible, input:focus-visible, .row-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.tabs button {
+  font: inherit; background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted);
+  padding: 10px 14px; cursor: pointer; white-space: nowrap;
+}
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 16px; align-items: start; }
+@media (max-width: 820px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.group { display: flex; flex-direction: column; gap: 8px; }
+.fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field label { font-size: .82rem; color: var(--muted); }
+.field .input { display: flex; align-items: center; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; }
+.field input { font: inherit; font-family: var(--font-num); width: 100%; min-width: 0; border: 0; background: transparent; color: var(--ink); padding: 8px 10px; }
+.field .unit { color: var(--muted); font-size: .8rem; padding-right: 10px; }
+.field.wide { grid-column: 1 / -1; }
+
+.btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn { font: inherit; font-size: .9rem; border-radius: 8px; padding: 8px 14px; cursor: pointer; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.tag { font-size: .82rem; color: var(--muted); align-self: center; }
+.tag b { color: var(--ink); font-weight: 500; }
+
+.verdict { border-radius: 8px; padding: 10px 12px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.verdict.ok { background: var(--ok-bg); color: var(--ok); }
+.verdict.warn { background: var(--warn-bg); color: var(--warn); }
+.verdict.bad { background: var(--bad-bg); color: var(--bad); }
+
+.metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 420px) { .metrics { grid-template-columns: minmax(0, 1fr); } }
+.metric { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.metric .k { font-size: .8rem; color: var(--muted); }
+.metric .v { font-family: var(--font-num); font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.metric .range { font-size: .75rem; color: var(--muted); }
+.meter { position: relative; height: 6px; background: var(--line); border-radius: 3px; }
+.meter .band { position: absolute; top: 0; bottom: 0; background: var(--ok); opacity: .35; border-radius: 3px; }
+.meter .pin { position: absolute; top: -3px; width: 3px; height: 12px; background: var(--ink); border-radius: 2px; transform: translateX(-1px); }
+
+dl.facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 0; font-size: .9rem; }
+dl.facts dt { color: var(--muted); }
+dl.facts dd { margin: 0; text-align: right; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+ul.issues { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: .9rem; }
+ul.issues li { padding-left: 14px; border-left: 3px solid; }
+ul.issues li.ERROR { border-color: var(--bad); color: var(--bad); }
+ul.issues li.WARNING { border-color: var(--warn); color: var(--warn); }
+.error { color: var(--bad); font-size: .9rem; }
+
+figure.section { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+figure.section svg { width: 100%; height: auto; max-width: 420px; margin: 0 auto; display: block; background: var(--surface-2); border-radius: 8px; }
+figure.section figcaption { font-size: .78rem; color: var(--muted); }
+
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; max-height: 520px; overflow-y: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--surface-2); font-weight: 500; color: var(--muted); font-size: .8rem; }
+td.n { font-family: var(--font-num); font-variant-numeric: tabular-nums; text-align: right; }
+tr.pick { cursor: pointer; }
+tr.pick:hover td { background: var(--accent-soft); }
+.row-btn { font: inherit; font-size: .82rem; background: none; border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; cursor: pointer; color: var(--accent); }
+
+.search { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+.search .field { flex: 1 1 220px; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.mcard { border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px; background: var(--surface); cursor: pointer; text-align: left; font: inherit; color: var(--ink); }
+.mcard.ok { border-left: 4px solid var(--ok); }
+.mcard.warn { border-left: 4px solid var(--warn); }
+.mcard.no { opacity: .62; border-left: 4px solid var(--line); }
+.mcard.sel { outline: 2px solid var(--accent); }
+.mcard .top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.mcard .top b { font-weight: 600; }
+.mcard .note { font-size: .84rem; color: var(--muted); }
+.mcard .rates { display: flex; flex-wrap: wrap; gap: 4px; }
+.pill { font-size: .75rem; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); }
+.pill.GOOD { background: var(--ok-bg); color: var(--ok); }
+.pill.FAIR { background: var(--warn-bg); color: var(--warn); }
+.pill.POOR { background: var(--bad-bg); color: var(--bad); }
+.mcard .why { font-size: .82rem; }
+.mcard .why .p { color: var(--bad); }
+.mcard .why .c { color: var(--warn); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font: inherit; font-size: .84rem; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 5px 12px; cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); }
+
+.note-foot { font-size: .8rem; color: var(--muted); }
+.mat-line { font-size: .88rem; color: var(--muted); }
+.mat-line.bad { color: var(--bad); }
+@media (prefers-reduced-motion: no-preference) { .btn, .chip, .seg button { transition: background-color .15s, border-color .15s; } }
+</style>
+
+<div class="wrap">
+  <header class="bar">
+    <div class="brand">
+      <h1>O型環設計</h1>
+      <small>溝槽計算 · AS568 / JIS B2401 尺寸表 · 材質選擇</small>
+    </div>
+    <div class="seg" role="group" aria-label="長度單位" id="unitSeg"></div>
+  </header>
+
+  <nav class="tabs" role="tablist" id="tabs"></nav>
+
+  <!-- 溝槽設計 -->
+  <section id="tab-design" role="tabpanel">
+    <div class="grid">
+      <div class="panel">
+        <div class="group">
+          <h2>密封型式</h2>
+          <div class="seg" role="group" aria-label="密封型式" id="sealSeg"></div>
+          <div class="seg" role="group" aria-label="使用條件" id="serviceSeg"></div>
+          <div class="mat-line" id="matLine"></div>
+        </div>
+
+        <div class="group">
+          <h2>O 型環</h2>
+          <div class="fields">
+            <div class="field"><label for="f-id">內徑 ID</label><div class="input"><input id="f-id" inputmode="decimal"><span class="unit u"></span></div></div>
+            <div class="field"><label for="f-cs">線徑 CS</label><div class="input"><input id="f-cs" inputmode="decimal"><span class="unit u"></span></div></div>
+          </div>
+          <div class="btns">
+            <button class="btn" id="goSizes" type="button">從尺寸表選</button>
+            <span class="tag" id="sizeTag"></span>
+          </div>
+        </div>
+
+        <div class="group">
+          <h2>溝槽</h2>
+          <div class="fields">
+            <div class="field" id="w-mate"><label for="f-mate" id="l-mate">缸筒內徑</label><div class="input"><input id="f-mate" inputmode="decimal"><span class="unit u"></span></div></div>
+            <div class="field"><label for="f-groove" id="l-groove">溝槽底徑</label><div class="input"><input id="f-groove" inputmode="decimal"><span class="unit u"></span></div></div>
+            <div class="field" id="w-face"><label for="f-face">溝槽深度</label><div class="input"><input id="f-face" inputmode="decimal"><span class="unit u"></span></div></div>
+            <div class="field"><label for="f-width">溝槽寬度</label><div class="input"><input id="f-width" inputmode="decimal"><span class="unit u"></span></div></div>
+          </div>
+          <div class="btns">
+            <button class="btn primary" id="btnSuggest" type="button">推薦溝槽尺寸</button>
+            <button class="btn" id="btnFind" type="button">依配合直徑找標準尺寸</button>
+          </div>
+        </div>
+
+        <div class="group" id="candBox" hidden>
+          <h2>適用的標準尺寸</h2>
+          <div class="table-wrap" style="max-height:340px">
+            <table>
+              <thead><tr><th>規格</th><th>ID × CS</th><th>溝槽 Ø × 寬</th><th>壓縮</th><th>拉伸</th><th></th></tr></thead>
+              <tbody id="candBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" aria-live="polite">
+        <div id="verdict" class="verdict"></div>
+        <div class="metrics" id="metrics"></div>
+        <figure class="section">
+          <svg id="diagram" viewBox="0 0 240 170" role="img" aria-label="溝槽截面示意圖"></svg>
+          <figcaption id="diagCap">截面依比例繪製，O 型環以等面積橢圓表示壓縮後形狀</figcaption>
+        </figure>
+        <dl class="facts" id="facts"></dl>
+        <ul class="issues" id="issues"></ul>
+        <div class="error" id="err" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 尺寸表 -->
+  <section id="tab-sizes" role="tabpanel" hidden>
+    <div class="panel">
+      <div class="search">
+        <div class="field"><label for="q">代號或內徑</label><div class="input"><input id="q" placeholder="例如 210、P22、35"><span class="unit u"></span></div></div>
+        <div class="chips" id="stdChips"></div>
+      </div>
+      <div class="tag" id="sizeCount"></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>規格</th><th>標準</th><th style="text-align:right">內徑 ID</th><th style="text-align:right">線徑 CS</th><th style="text-align:right">外徑 OD</th><th></th></tr></thead>
+          <tbody id="sizeBody"></tbody>
+        </table>
+      </div>
+      <p class="note-foot">AS568 原始為英吋，JIS 為公制；表內依目前單位換算顯示。數值依標準規則整理，正式使用前請與標準原文或廠商型錄核對。</p>
+    </div>
+  </section>
+
+  <!-- 材質選擇 -->
+  <section id="tab-material" role="tabpanel" hidden>
+    <div class="panel">
+      <div class="group">
+        <h2>使用條件</h2>
+        <div class="seg" role="group" aria-label="使用條件" id="serviceSeg2"></div>
+        <div class="fields" style="max-width:420px">
+          <div class="field"><label for="t-min">最低溫度</label><div class="input"><input id="t-min" inputmode="numeric"><span class="unit">°C</span></div></div>
+          <div class="field"><label for="t-max">最高溫度</label><div class="input"><input id="t-max" inputmode="numeric"><span class="unit">°C</span></div></div>
+        </div>
+      </div>
+      <div class="group">
+        <h2>接觸介質（可複選）</h2>
+        <div class="chips" id="mediaChips"></div>
+      </div>
+      <div class="error" id="matErr" hidden></div>
+      <div class="cards" id="matCards"></div>
+      <p class="note-foot">溫度與耐受性為一般工業經驗值，同一材質依配方差異很大，正式選用請以廠商型錄為準。點選材質即套用到溝槽設計。</p>
+    </div>
+  </section>
+</div>
+
+<script>
+/*CORE-START*/
+// ===== 計算核心：與 Android 版 core 模組（Kotlin）同一套公式與資料 =====
+const Core = (() => {
+  const INCH = 25.4;
+  // Kotlin 的 kotlin.math.round 是「四捨六入五成雙」，這裡一致
+  const rint = (x) => {
+    const f = Math.floor(x), d = x - f;
+    if (d > 0.5) return f + 1;
+    if (d < 0.5) return f;
+    return f % 2 === 0 ? f : f + 1;
+  };
+  const round2 = (v) => rint(v * 100) / 100;
+  const round3 = (v) => rint(v * 1000) / 1000;
+  const pct = (v) => (v * 100).toFixed(1) + "%";
+
+  const SealType = {
+    PISTON: { key: "PISTON", label: "活塞（外徑）密封" },
+    ROD: { key: "ROD", label: "軸桿（內徑）密封" },
+    FACE: { key: "FACE", label: "端面（軸向）密封" },
+  };
+  const Service = { STATIC: { key: "STATIC", label: "靜態" }, DYNAMIC: { key: "DYNAMIC", label: "動態（往復）" } };
+
+  function oring(id, cs) {
+    if (!(id > 0)) throw new Error("內徑必須大於 0");
+    if (!(cs > 0)) throw new Error("線徑必須大於 0");
+    return { id, cs, od: id + 2 * cs };
+  }
+
+  function gland(type, width, grooveDia, mate = 0, faceDepth = 0) {
+    if (!(width > 0)) throw new Error("溝槽寬度必須大於 0");
+    if (!(grooveDia > 0)) throw new Error("溝槽直徑必須大於 0");
+    if (type === "PISTON" && !(mate > grooveDia)) throw new Error("缸筒內徑必須大於溝槽底徑");
+    if (type === "ROD" && !(grooveDia > mate && mate > 0)) throw new Error("溝槽底徑必須大於軸桿外徑");
+    if (type === "FACE" && !(faceDepth > 0)) throw new Error("端面溝槽深度必須大於 0");
+    const depth = type === "PISTON" ? (mate - grooveDia) / 2 : type === "ROD" ? (grooveDia - mate) / 2 : faceDepth;
+    return { type, width, grooveDia, mate, faceDepth, depth };
+  }
+
+  function limitsFor(type, service) {
+    if (service === "DYNAMIC") return { minC: 0.10, maxC: 0.20, maxS: 0.03, maxF: 0.85 };
+    if (type === "FACE") return { minC: 0.20, maxC: 0.30, maxS: 0.05, maxF: 0.85 };
+    return { minC: 0.15, maxC: 0.30, maxS: 0.05, maxF: 0.85 };
+  }
+
+  const HARD_MAX_COMPRESSION = 0.40, HARD_MAX_STRETCH = 0.08, TARGET_FILL = 0.75;
+
+  function stretch(ring, g) {
+    const seat = g.type === "ROD" ? g.mate : g.grooveDia;
+    return (seat - ring.id) / ring.id;
+  }
+  const effCs = (cs, s) => (s > 0 ? cs / Math.sqrt(1 + s) : cs);
+
+  function calculate(ring, g, service = "STATIC", limits = limitsFor(g.type, service)) {
+    const depth = g.depth, s = stretch(ring, g), cs = effCs(ring.cs, s);
+    const compression = (cs - depth) / cs;
+    const area = Math.PI * cs * cs / 4;
+    const fill = area / (depth * g.width);
+    const issues = [];
+    const add = (severity, code, message) => issues.push({ severity, code, message });
+    if (compression <= 0) add("ERROR", "NO_SQUEEZE", "沒有壓縮量，無法密封");
+    else if (compression < limits.minC) add("WARNING", "LOW_SQUEEZE", `壓縮率 ${pct(compression)} 低於建議下限 ${pct(limits.minC)}`);
+    else if (compression > HARD_MAX_COMPRESSION) add("ERROR", "OVER_SQUEEZE", `壓縮率 ${pct(compression)} 過高，易永久變形且難以安裝`);
+    else if (compression > limits.maxC) add("WARNING", "HIGH_SQUEEZE", `壓縮率 ${pct(compression)} 高於建議上限 ${pct(limits.maxC)}`);
+
+    if (s > HARD_MAX_STRETCH) add("ERROR", "OVER_STRETCH", `拉伸率 ${pct(s)} 過高，線徑變細且加速老化`);
+    else if (s > limits.maxS) add("WARNING", "HIGH_STRETCH", `拉伸率 ${pct(s)} 高於建議上限 ${pct(limits.maxS)}`);
+    else if (s < 0 && g.type === "PISTON") add("WARNING", "LOOSE_RING", "O 型環內徑大於溝槽底徑，安裝時可能鬆脫或扭轉");
+
+    if (g.width < cs) add("ERROR", "NARROW_GROOVE", "溝槽寬度小於線徑，O 型環放不進去");
+    if (fill > 1.0) add("ERROR", "OVERFILL", `填充率 ${pct(fill)} 超過 100%，溝槽空間不足`);
+    else if (fill > limits.maxF) add("ERROR", "HIGH_FILL", `填充率 ${pct(fill)} 高於上限 ${pct(limits.maxF)}，膨脹或熱脹時會擠壞`);
+
+    return { depth, stretch: s, cs, compression, fill, limits, issues, isOk: !issues.some((i) => i.severity === "ERROR") };
+  }
+
+  function suggest(ring, type, service = "STATIC", mate = 0, limits = limitsFor(type, service)) {
+    const target = (limits.minC + limits.maxC) / 2;
+    const dims = (s) => {
+      const cs = effCs(ring.cs, s);
+      const depth = cs * (1 - target);
+      const width = Math.max(Math.PI * cs * cs / 4 / (depth * TARGET_FILL), cs * 1.05);
+      return [depth, width];
+    };
+    if (type === "PISTON") {
+      if (!(mate > 0)) throw new Error("請輸入缸筒內徑");
+      let grooveDia = mate - 2 * ring.cs, depth = 0, width = 0;
+      for (let i = 0; i < 10; i++) {
+        [depth, width] = dims((grooveDia - ring.id) / ring.id);
+        grooveDia = mate - 2 * depth;
+      }
+      return gland(type, round2(width), round2(mate - 2 * round2(depth)), mate);
+    }
+    if (type === "ROD") {
+      if (!(mate > 0)) throw new Error("請輸入軸桿外徑");
+      const [depth, width] = dims((mate - ring.id) / ring.id);
+      return gland(type, round2(width), round2(mate + 2 * round2(depth)), mate);
+    }
+    const [depth, width] = dims(0);
+    return gland(type, round2(width), ring.id, 0, round2(depth));
+  }
+
+  // ---- 單位 ----
+  const Units = {
+    MM: { key: "MM", label: "mm", symbol: "mm", per: 1, decimals: 3 },
+    INCH: { key: "INCH", label: "inch", symbol: "in", per: INCH, decimals: 4 },
+  };
+  const fmtUnit = (u, mm) => {
+    let s = (mm / u.per).toFixed(u.decimals);
+    if (s.includes(".")) s = s.replace(/0+$/, "").replace(/\.$/, "");
+    return s === "-0" ? "0" : s;
+  };
+  const parseUnit = (u, text) => {
+    const t = String(text).trim().replace(",", ".");
+    if (t === "" || !/^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(t)) return null;
+    return Number(t) * u.per;
+  };
+
+  // ---- AS568 ----
+  const as568 = (() => {
+    const out = [];
+    const add = (dash, idIn, csIn) => out.push({
+      standard: "AS568", code: "-" + String(dash).padStart(3, "0"),
+      id: idIn * INCH, cs: csIn * INCH, idIn, csIn,
+    });
+    const list = (first, cs, ids) => ids.forEach((id, i) => add(first + i, id, cs));
+    const step = (a, b, cs, start, st) => { for (let d = a; d <= b; d++) add(d, round3(start + (d - a) * st), cs); };
+    add(1, 0.029, 0.040); add(2, 0.042, 0.050); add(3, 0.056, 0.060);
+    list(4, 0.070, [0.070, 0.101, 0.114, 0.145, 0.176, 0.208, 0.239, 0.301, 0.364, 0.426, 0.489, 0.551, 0.614, 0.676, 0.739, 0.801, 0.864, 0.926, 0.989, 1.051, 1.114, 1.176, 1.239, 1.301, 1.364]);
+    step(29, 41, 0.070, 1.489, 0.125);
+    step(42, 50, 0.070, 3.239, 0.25);
+    list(102, 0.103, [0.049, 0.081, 0.112, 0.143, 0.174, 0.206, 0.237, 0.299, 0.362, 0.424, 0.487, 0.549, 0.612, 0.674, 0.737, 0.799, 0.862, 0.924, 0.987, 1.049, 1.112, 1.174, 1.237, 1.299, 1.362, 1.424, 1.487, 1.549, 1.612, 1.674, 1.737, 1.799, 1.862, 1.925, 1.987, 2.050, 2.112, 2.175, 2.237, 2.300, 2.362, 2.425, 2.487, 2.550, 2.612, 2.675, 2.737, 2.800, 2.862, 2.987]);
+    step(152, 178, 0.103, 3.237, 0.25);
+    list(201, 0.139, [0.171, 0.234, 0.296, 0.359, 0.421, 0.484, 0.546, 0.609, 0.671, 0.734, 0.796, 0.859, 0.921, 0.984, 1.046, 1.109, 1.171, 1.234, 1.296, 1.359, 1.421, 1.484]);
+    step(223, 258, 0.139, 1.609, 0.125);
+    step(259, 262, 0.139, 6.234, 0.25);
+    step(263, 274, 0.139, 7.484, 0.5);
+    step(275, 281, 0.139, 13.984, 1.0);
+    list(282, 0.139, [20.955, 21.955, 22.940]);
+    list(309, 0.210, [0.412, 0.475, 0.537, 0.600, 0.662, 0.725, 0.787, 0.850, 0.912, 0.975, 1.037, 1.100, 1.162, 1.225, 1.287, 1.350]);
+    step(325, 349, 0.210, 1.475, 0.125);
+    step(350, 371, 0.210, 4.725, 0.25);
+    step(372, 377, 0.210, 10.475, 0.5);
+    step(378, 385, 0.210, 13.975, 1.0);
+    step(386, 391, 0.210, 21.969, 1.0);
+    step(392, 395, 0.210, 27.959, 1.0);
+    step(425, 437, 0.275, 4.475, 0.125);
+    step(438, 445, 0.275, 6.225, 0.25);
+    step(446, 460, 0.275, 8.475, 0.5);
+    step(461, 469, 0.275, 15.955, 0.5);
+    step(470, 471, 0.275, 20.955, 1.0);
+    step(472, 475, 0.275, 22.940, 1.0);
+    [[901, 0.185, 0.056], [902, 0.239, 0.064], [903, 0.301, 0.064], [904, 0.351, 0.072], [905, 0.414, 0.072],
+     [906, 0.468, 0.078], [907, 0.530, 0.082], [908, 0.644, 0.087], [909, 0.706, 0.097], [910, 0.755, 0.097],
+     [911, 0.863, 0.116], [912, 0.924, 0.116], [913, 0.986, 0.116], [914, 1.047, 0.116], [916, 1.171, 0.116],
+     [918, 1.355, 0.116], [920, 1.475, 0.118], [924, 1.720, 0.118], [928, 2.090, 0.118], [932, 2.337, 0.118]]
+      .forEach(([d, i, c]) => add(d, i, c));
+    return out;
+  })();
+
+  // ---- JIS B2401 ----
+  const jis = (() => {
+    const series = (std, prefix, cs, offset, noms) => noms.map((n) => ({
+      standard: std, code: prefix + n, id: round2(Number(n.replace(/A$/, "")) - offset), cs,
+    }));
+    const range = (a, b, s) => { const r = []; for (let i = a; i <= b; i += s) r.push(String(i)); return r; };
+    const p = [
+      ...series("JIS_P", "P", 1.9, 0.2, ["3", "4", "5", "6", "7", "8", "9", "10"]),
+      ...series("JIS_P", "P", 2.4, 0.2, ["10A", "11", "11.2", "12", "12.5", "14", "15", "16", "18", "20", "21", "22"]),
+      ...series("JIS_P", "P", 3.5, 0.3, ["22A", "22.4", "24", "25", "25.5", "26", "28", "29", "29.5", "30", "31", "31.5", "32", "34", "35", "35.5", "36", "38", "39", "40", "41", "42", "44", "45", "46", "48", "49", "50"]),
+      ...series("JIS_P", "P", 5.7, 0.4, ["48A", "50A", "52", "53", "55", "56", "58", "60", "62", "63", "65", "67", "70", "71", "75", "80", "85", "90", "95", "100", "102", "105", "110", "112", "115", "120", "125", "130", "132", "135", "140", "145", "150"]),
+      ...series("JIS_P", "P", 8.4, 0.5, ["150A", "155", "160", "165", "170", "175", "180", "185", "190", "195", "200", "205", "209", "210", "215", "220", "225", "230", "235", "240", "245", "250", "255", "260", "265", "270", "275", "280", "285", "290", "295", "300", "315", "320", "335", "340", "355", "360", "375", "385", "400"]),
+    ];
+    const g = [
+      ...series("JIS_G", "G", 3.1, 0.6, range(25, 145, 5)),
+      ...series("JIS_G", "G", 5.7, 0.7, range(150, 300, 5)),
+    ];
+    return { p, g };
+  })();
+
+  const Standards = {
+    AS568: "AS568（美規）",
+    JIS_P: "JIS B2401 P（運動用）",
+    JIS_G: "JIS B2401 G（固定用）",
+  };
+  const allSizes = [...as568, ...jis.p, ...jis.g];
+  const displayName = (s) => (s.standard === "AS568" ? "AS568 " : "JIS ") + s.code;
+  const isPortSeal = (s) => s.standard === "AS568" && s.code.startsWith("-9");
+  const okForService = (s, service) => !(service === "DYNAMIC" && s.standard === "JIS_G");
+
+  function findSize(code) {
+    const key = String(code).trim().toUpperCase();
+    const j = [...jis.p, ...jis.g].find((s) => s.code === key);
+    if (j) return j;
+    const n = parseInt(key.replace(/^-/, ""), 10);
+    if (!/^-?\d+$/.test(key) || isNaN(n)) return null;
+    const c = "-" + String(n).padStart(3, "0");
+    return as568.find((s) => s.code === c) || null;
+  }
+
+  function search(query, standards = Object.keys(Standards), tol = 0.5, unit = Units.MM) {
+    const q = String(query).trim().toUpperCase();
+    const pool = allSizes.filter((s) => standards.includes(s.standard));
+    if (!q) return pool;
+    const num = parseUnit(unit, q);
+    return pool.filter((s) => s.code.toUpperCase().includes(q) || (num !== null && Math.abs(s.id - num) <= tol));
+  }
+
+  function suitableFor(type, service, mate, standards = Object.keys(Standards)) {
+    if (!(mate > 0)) throw new Error("請輸入配合直徑");
+    const limits = limitsFor(type, service);
+    const target = type === "ROD" ? 0 : limits.maxS / 2;
+    const cands = [];
+    for (const size of allSizes) {
+      if (!standards.includes(size.standard) || isPortSeal(size) || !okForService(size, service)) continue;
+      if (!(size.cs * 4 < mate)) continue;
+      const ring = oring(size.id, size.cs);
+      let g;
+      try {
+        g = suggest(ring, type, service, mate);
+        if (type === "FACE") g = gland("FACE", g.width, mate, 0, g.faceDepth);
+      } catch (e) { continue; }
+      const r = calculate(ring, g, service);
+      if (r.issues.length) continue;
+      if (r.stretch < 0 && type !== "ROD") continue;
+      if (type === "ROD" && r.stretch < -0.03) continue;
+      cands.push({ size, gland: g, result: r });
+    }
+    const groups = new Map();
+    for (const c of cands) {
+      const k = c.size.standard + "|" + c.size.cs;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(c);
+    }
+    const best = [...groups.values()].map((grp) =>
+      grp.reduce((a, b) => (Math.abs(b.result.stretch - target) < Math.abs(a.result.stretch - target) ? b : a)));
+    return best.sort((a, b) => Math.abs(a.result.stretch - target) - Math.abs(b.result.stretch - target));
+  }
+
+  // ---- 材質 ----
+  const Media = {
+    MINERAL_OIL: "礦物油／液壓油", FUEL: "汽油／燃油", WATER_STEAM: "熱水／蒸汽", OZONE_WEATHER: "臭氧／戶外耐候",
+    BRAKE_FLUID: "煞車油（乙二醇系 DOT3/4）", PHOSPHATE_ESTER: "磷酸酯液壓油（Skydrol）", DILUTE_ACID: "稀酸", KETONE: "酮類（丙酮、MEK）",
+  };
+  const Ratings = { GOOD: { label: "良好", score: 2 }, FAIR: { label: "尚可", score: 1 }, POOR: { label: "不建議", score: 0 } };
+  const mediaKeys = Object.keys(Media);
+  const r = (...v) => Object.fromEntries(mediaKeys.map((k, i) => [k, ({ G: "GOOD", F: "FAIR", P: "POOR" })[v[i]]]));
+  const Materials = [
+    { code: "NBR", name: "丁腈橡膠", min: -30, max: 100, dyn: true, cost: 1, res: r("G", "G", "F", "P", "P", "P", "F", "P"), note: "最常用、便宜；耐油佳，不耐臭氧與日照" },
+    { code: "HNBR", name: "氫化丁腈橡膠", min: -30, max: 150, dyn: true, cost: 3, res: r("G", "G", "G", "F", "P", "P", "F", "P"), note: "NBR 強化版，耐溫、耐磨、耐熱水較好" },
+    { code: "FKM", name: "氟橡膠（Viton®）", min: -20, max: 200, dyn: true, cost: 3, res: r("G", "G", "F", "G", "P", "P", "G", "P"), note: "耐高溫、耐油與燃油；不耐酮類、煞車油與蒸汽" },
+    { code: "EPDM", name: "三元乙丙橡膠", min: -50, max: 150, dyn: true, cost: 1, res: r("P", "P", "G", "G", "G", "G", "G", "G"), note: "耐水、蒸汽、煞車油、耐候；遇礦物油會膨脹" },
+    { code: "VMQ", name: "矽橡膠", min: -60, max: 200, dyn: false, cost: 2, res: r("F", "P", "F", "G", "F", "P", "F", "F"), note: "溫度範圍最寬、食品級常用；強度與耐磨差，只適合靜態" },
+    { code: "FVMQ", name: "氟矽橡膠", min: -60, max: 175, dyn: false, cost: 4, res: r("G", "G", "F", "G", "P", "P", "F", "P"), note: "耐低溫又耐燃油（航太常用）；強度差，只適合靜態" },
+    { code: "CR", name: "氯丁橡膠（Neoprene）", min: -40, max: 100, dyn: true, cost: 1, res: r("F", "P", "F", "G", "P", "P", "F", "P"), note: "耐候、耐冷媒；耐油中等" },
+    { code: "AU", name: "聚氨酯（PU）", min: -30, max: 80, dyn: true, cost: 2, res: r("G", "F", "P", "G", "P", "P", "P", "P"), note: "耐磨與抗擠出最好，適合高壓液壓；不耐熱水（水解）" },
+    { code: "FFKM", name: "全氟橡膠", min: -15, max: 300, dyn: true, cost: 5, res: r("G", "G", "G", "G", "G", "G", "G", "G"), note: "幾乎耐所有化學品與高溫；價格極高" },
+  ];
+  const matLabel = (m) => `${m.code}（${m.name}）`;
+
+  function evaluate(tMin, tMax, media, service = "STATIC") {
+    if (tMin > tMax) throw new Error("最低溫度不能高於最高溫度");
+    return Materials.map((m, idx) => {
+      const problems = [], cautions = [];
+      if (tMin < m.min) problems.push(`低溫只到 ${m.min}°C`);
+      if (tMax > m.max) problems.push(`高溫只到 ${m.max}°C`);
+      if (service === "DYNAMIC" && !m.dyn) problems.push("不適合動態使用");
+      for (const md of media) {
+        const rt = m.res[md];
+        if (rt === "POOR") problems.push("不耐" + Media[md]);
+        else if (rt === "FAIR") cautions.push(Media[md] + "僅尚可");
+      }
+      if (tMax <= m.max && m.max - tMax < 10) cautions.push("接近溫度上限");
+      const score = problems.length ? -1
+        : media.reduce((a, md) => a + Ratings[m.res[md]].score, 0) * 10 + Math.trunc(Math.min(m.max - tMax, 50) / 10) - m.cost * 2;
+      return { material: m, score, problems, cautions, suitable: problems.length === 0, idx };
+    }).sort((a, b) => (b.suitable - a.suitable) || (b.score - a.score) || (a.idx - b.idx));
+  }
+
+  return {
+    SealType, Service, Units, Standards, Media, Ratings, Materials,
+    oring, gland, limitsFor, calculate, suggest, fmtUnit, parseUnit,
+    as568, jis, allSizes, displayName, findSize, search, suitableFor, evaluate, matLabel, pct,
+  };
+})();
+if (typeof module !== "undefined") module.exports = Core;
+/*CORE-END*/
+
+// ===== 介面 =====
+(() => {
+  if (typeof document === "undefined") return;
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem("oring:" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem("oring:" + k, JSON.stringify(v)); } catch (e) { /* 無法儲存時忽略 */ } },
+  };
+
+  // 欄位一律以 mm 存在 state，畫面上依單位顯示；使用者正在編輯的欄位保留原文字
+  const defaults = { id: 20.0, cs: 3.53, mate: 26.0, groove: 20.5, width: 4.8, face: 2.7 };
+  const state = {
+    tab: store.get("tab", "design"),
+    unit: store.get("unit", "MM"),
+    seal: store.get("seal", "PISTON"),
+    service: store.get("service", "STATIC"),
+    mm: Object.assign({}, defaults, store.get("mm", {})),
+    sizeLabel: store.get("sizeLabel", null),
+    material: store.get("material", null),
+    tMin: store.get("tMin", "-20"),
+    tMax: store.get("tMax", "80"),
+    media: store.get("media", ["MINERAL_OIL"]),
+    stds: store.get("stds", Object.keys(Core.Standards)),
+  };
+  const fieldIds = { id: "f-id", cs: "f-cs", mate: "f-mate", groove: "f-groove", width: "f-width", face: "f-face" };
+  const unit = () => Core.Units[state.unit];
+  const save = () => ["tab", "unit", "seal", "service", "mm", "sizeLabel", "material", "tMin", "tMax", "media", "stds"].forEach((k) => store.set(k, state[k]));
+
+  function segment(el, items, current, onPick) {
+    el.innerHTML = items.map(([k, label]) =>
+      `<button type="button" data-k="${esc(k)}" aria-pressed="${k === current}">${esc(label)}</button>`).join("");
+    el.onclick = (e) => { const b = e.target.closest("button"); if (b) onPick(b.dataset.k); };
+  }
+
+  // ---- 分頁 ----
+  const tabs = [["design", "溝槽設計"], ["sizes", "尺寸表"], ["material", "材質選擇"]];
+  function renderTabs() {
+    $("tabs").innerHTML = tabs.map(([k, l]) =>
+      `<button role="tab" type="button" id="tabbtn-${k}" aria-controls="tab-${k}" aria-selected="${state.tab === k}" data-k="${k}">${l}</button>`).join("");
+    tabs.forEach(([k]) => { $("tab-" + k).hidden = state.tab !== k; });
+  }
+  $("tabs").onclick = (e) => { const b = e.target.closest("button"); if (!b) return; showTab(b.dataset.k); };
+  function showTab(k) {
+    state.tab = k; renderTabs();
+    if (k === "sizes") renderSizes();
+    if (k === "material") renderMaterials();
+    save();
+  }
+
+  // ---- 單位 ----
+  function renderUnit() {
+    segment($("unitSeg"), [["MM", "公制 mm"], ["INCH", "英制 inch"]], state.unit, (k) => {
+      state.unit = k; writeFields(); renderUnit(); renderDesign(); if (state.tab === "sizes") renderSizes(); save();
+    });
+    document.querySelectorAll(".u").forEach((s) => { s.textContent = unit().symbol; });
+  }
+
+  function writeFields(except) {
+    for (const [k, id] of Object.entries(fieldIds)) {
+      if (k === except) continue;
+      $(id).value = Core.fmtUnit(unit(), state.mm[k]);
+    }
+  }
+
+  // ---- 溝槽設計 ----
+  const sealItems = Object.values(Core.SealType).map((s) => [s.key, s.label]);
+  const serviceItems = Object.values(Core.Service).map((s) => [s.key, s.label]);
+
+  function renderSealControls() {
+    segment($("sealSeg"), sealItems, state.seal, (k) => { state.seal = k; renderSealControls(); renderDesign(); save(); });
+    segment($("serviceSeg"), serviceItems, state.service, setService);
+    segment($("serviceSeg2"), serviceItems, state.service, setService);
+    const face = state.seal === "FACE";
+    $("w-mate").hidden = face;
+    $("w-face").hidden = !face;
+    $("l-mate").textContent = state.seal === "ROD" ? "軸桿外徑" : "缸筒內徑";
+    $("l-groove").textContent = state.seal === "PISTON" ? "溝槽底徑（活塞上）" : state.seal === "ROD" ? "溝槽底徑（殼體內）" : "溝槽內徑";
+  }
+  function setService(k) {
+    state.service = k; renderSealControls(); renderDesign(); if (state.tab === "material") renderMaterials(); save();
+  }
+
+  function onField(k, e) {
+    const v = Core.parseUnit(unit(), e.target.value);
+    if (v !== null) state.mm[k] = v;
+    if (k === "id" || k === "cs") state.sizeLabel = null;
+    renderDesign(v === null ? `「${e.target.value}」不是有效數字` : null);
+    save();
+  }
+  Object.entries(fieldIds).forEach(([k, id]) => {
+    $(id).addEventListener("input", (e) => onField(k, e));
+    $(id).addEventListener("blur", () => writeFields());
+  });
+
+  function currentGland() {
+    const m = state.mm;
+    return state.seal === "FACE"
+      ? Core.gland("FACE", m.width, m.groove, 0, m.face)
+      : Core.gland(state.seal, m.width, m.groove, m.mate);
+  }
+
+  function renderMatLine() {
+    const m = Core.Materials.find((x) => x.code === state.material);
+    const el = $("matLine");
+    if (!m) { el.className = "mat-line"; el.textContent = "材質：未選擇（到「材質選擇」挑選）"; return; }
+    const bad = state.service === "DYNAMIC" && !m.dyn;
+    el.className = "mat-line" + (bad ? " bad" : "");
+    el.textContent = `材質：${Core.matLabel(m)}　${m.min}～${m.max}°C` + (bad ? "　不適合動態使用" : "");
+  }
+
+  function meter(value, lo, hi, max) {
+    const pos = (v) => Math.max(0, Math.min(100, (v / max) * 100));
+    return `<div class="meter" aria-hidden="true"><span class="band" style="left:${pos(lo)}%;width:${pos(hi) - pos(lo)}%"></span><span class="pin" style="left:${pos(value)}%"></span></div>`;
+  }
+
+  function renderDesign(inputError) {
+    renderMatLine();
+    const tag = $("sizeTag");
+    tag.innerHTML = state.sizeLabel ? `目前：<b>${esc(state.sizeLabel)}</b>` : "目前：自訂尺寸";
+    const err = $("err");
+    let res, ring, g;
+    try {
+      ring = Core.oring(state.mm.id, state.mm.cs);
+      g = currentGland();
+      res = Core.calculate(ring, g, state.service);
+    } catch (e) {
+      err.hidden = false; err.textContent = e.message;
+      $("verdict").className = "verdict bad"; $("verdict").textContent = "無法計算";
+      $("metrics").innerHTML = ""; $("facts").innerHTML = ""; $("issues").innerHTML = ""; $("diagram").innerHTML = "";
+      return;
+    }
+    err.hidden = !inputError; err.textContent = inputError || "";
+    const v = $("verdict");
+    if (!res.isOk) { v.className = "verdict bad"; v.textContent = "✗ 設計不合格"; }
+    else if (res.issues.length) { v.className = "verdict warn"; v.textContent = "! 可用，但有警告"; }
+    else { v.className = "verdict ok"; v.textContent = "✓ 設計合格"; }
+
+    const L = res.limits;
+    $("metrics").innerHTML = [
+      ["壓縮率", res.compression, `建議 ${(L.minC * 100).toFixed(0)}–${(L.maxC * 100).toFixed(0)}%`, meter(res.compression, L.minC, L.maxC, 0.5)],
+      ["拉伸率", res.stretch, `建議 0–${(L.maxS * 100).toFixed(0)}%`, meter(Math.max(res.stretch, 0), 0, L.maxS, 0.1)],
+      ["填充率", res.fill, `建議 ≤ ${(L.maxF * 100).toFixed(0)}%`, meter(res.fill, 0.5, L.maxF, 1.1)],
+    ].map(([k, val, range, m]) =>
+      `<div class="metric"><span class="k">${k}</span><span class="v">${(val * 100).toFixed(1)}%</span>${m}<span class="range">${range}</span></div>`).join("");
+
+    const u = unit(), f = (mm) => Core.fmtUnit(u, mm) + " " + u.symbol;
+    $("facts").innerHTML = [
+      ["溝槽深度", f(res.depth)],
+      ["拉伸後有效線徑", f(res.cs)],
+      ["O 型環外徑 OD", f(ring.od)],
+      ["溝槽截面積", (res.depth * g.width / (u.per * u.per)).toFixed(u === Core.Units.MM ? 2 : 5) + " " + u.symbol + "²"],
+    ].map(([k, val]) => `<dt>${k}</dt><dd>${esc(val)}</dd>`).join("");
+    $("issues").innerHTML = res.issues.map((i) => `<li class="${i.severity}">${esc(i.message)}</li>`).join("");
+    drawSection(res, g);
+  }
+
+  // 截面示意：溝槽寬 × 深依比例；壓縮後的 O 型環用等面積橢圓近似
+  function drawSection(res, g) {
+    const svg = $("diagram");
+    const W = g.width, D = res.depth, cs = res.cs;
+    const k = Math.min(110 / W, 80 / Math.max(D, cs));
+    const Wp = W * k, Dp = D * k, top = 46, x0 = (240 - Wp) / 2, bottom = top + Dp;
+    const labels = { PISTON: ["缸筒", "活塞"], ROD: ["軸桿", "殼體"], FACE: ["壓蓋", "本體"] }[g.type];
+    let ring;
+    if (res.compression > 0) {
+      const ry = Dp / 2, rx = Math.pow(cs * k / 2, 2) / ry;
+      ring = `<ellipse cx="${x0 + Wp / 2}" cy="${top + ry}" rx="${rx}" ry="${ry}" fill="var(--rubber)"/>`;
+    } else {
+      const rr = cs * k / 2;
+      ring = `<circle cx="${x0 + Wp / 2}" cy="${bottom - rr}" r="${rr}" fill="var(--rubber)"/>`;
+    }
+    const h = Math.max(bottom + 34, 150);
+    const u = unit(), n = (mm) => Core.fmtUnit(u, mm);
+    svg.setAttribute("viewBox", `0 0 240 ${h}`);
+    svg.innerHTML = `
+      <rect x="0" y="14" width="240" height="${top - 14}" fill="var(--steel-2)"/>
+      <path d="M0 ${top} H${x0} V${bottom} H${x0 + Wp} V${top} H240 V${h} H0 Z" fill="var(--steel)"/>
+      ${ring}
+      <text x="6" y="${top - 8}" font-size="9" fill="var(--ink)">${labels[0]}</text>
+      <text x="6" y="${h - 8}" font-size="9" fill="var(--ink)">${labels[1]}</text>
+      <line x1="${x0}" y1="${bottom + 10}" x2="${x0 + Wp}" y2="${bottom + 10}" stroke="var(--accent)" stroke-width=".8"/>
+      <line x1="${x0}" y1="${bottom + 6}" x2="${x0}" y2="${bottom + 14}" stroke="var(--accent)" stroke-width=".8"/>
+      <line x1="${x0 + Wp}" y1="${bottom + 6}" x2="${x0 + Wp}" y2="${bottom + 14}" stroke="var(--accent)" stroke-width=".8"/>
+      <text x="${x0 + Wp / 2}" y="${bottom + 23}" font-size="8.5" text-anchor="middle" fill="var(--accent)" font-family="var(--font-num)">寬 ${n(W)}</text>
+      <line x1="${x0 + Wp + 10}" y1="${top}" x2="${x0 + Wp + 10}" y2="${bottom}" stroke="var(--accent)" stroke-width=".8"/>
+      <text x="${x0 + Wp + 14}" y="${top + Dp / 2 + 3}" font-size="8.5" fill="var(--accent)" font-family="var(--font-num)">深 ${n(D)}</text>
+    `;
+  }
+
+  $("btnSuggest").onclick = () => {
+    try {
+      const ring = Core.oring(state.mm.id, state.mm.cs);
+      const g = Core.suggest(ring, state.seal, state.service, state.seal === "FACE" ? 0 : state.mm.mate);
+      state.mm.width = g.width; state.mm.groove = g.grooveDia;
+      if (state.seal === "FACE") state.mm.face = g.faceDepth;
+      writeFields(); renderDesign(); save();
+    } catch (e) { $("err").hidden = false; $("err").textContent = e.message; }
+  };
+
+  let candidates = [];
+  $("btnFind").onclick = () => {
+    try {
+      const mate = state.seal === "FACE" ? state.mm.groove : state.mm.mate;
+      candidates = Core.suitableFor(state.seal, state.service, mate);
+      const u = unit(), n = (mm) => Core.fmtUnit(u, mm);
+      $("candBody").innerHTML = candidates.length ? candidates.map((c, i) => `
+        <tr class="pick" data-i="${i}">
+          <td>${esc(Core.displayName(c.size))}</td>
+          <td class="n">${n(c.size.id)} × ${n(c.size.cs)}</td>
+          <td class="n">${n(c.gland.grooveDia)} × ${n(c.gland.width)}</td>
+          <td class="n">${Core.pct(c.result.compression)}</td>
+          <td class="n">${Core.pct(c.result.stretch)}</td>
+          <td><button class="row-btn" type="button" data-i="${i}">帶入</button></td>
+        </tr>`).join("") : `<tr><td colspan="6">找不到合適尺寸，請確認配合直徑。</td></tr>`;
+      $("candBox").hidden = false;
+      $("err").hidden = true;
+    } catch (e) { $("err").hidden = false; $("err").textContent = e.message; }
+  };
+  $("candBody").onclick = (e) => {
+    const row = e.target.closest("[data-i]"); if (!row) return;
+    const c = candidates[Number(row.dataset.i)];
+    state.mm.id = c.size.id; state.mm.cs = c.size.cs;
+    state.mm.width = c.gland.width; state.mm.groove = c.gland.grooveDia;
+    if (state.seal === "FACE") state.mm.face = c.gland.faceDepth;
+    state.sizeLabel = Core.displayName(c.size);
+    $("candBox").hidden = true;
+    writeFields(); renderDesign(); save();
+  };
+  $("goSizes").onclick = () => showTab("sizes");
+
+  // ---- 尺寸表 ----
+  function renderStdChips() {
+    $("stdChips").innerHTML = Object.entries(Core.Standards).map(([k, l]) =>
+      `<button class="chip" type="button" data-k="${k}" aria-pressed="${state.stds.includes(k)}">${esc(l)}</button>`).join("");
+  }
+  $("stdChips").onclick = (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    const k = b.dataset.k;
+    state.stds = state.stds.includes(k) ? state.stds.filter((x) => x !== k) : [...state.stds, k];
+    renderStdChips(); renderSizes(); save();
+  };
+  $("q").addEventListener("input", () => renderSizes());
+  let sizeRows = [];
+  function renderSizes() {
+    const u = unit(), n = (mm) => Core.fmtUnit(u, mm);
+    sizeRows = Core.search($("q").value, state.stds, 0.5, u);
+    $("sizeCount").textContent = `共 ${sizeRows.length} 筆（點選一列即帶入溝槽設計）`;
+    const shown = sizeRows.slice(0, 400);
+    $("sizeBody").innerHTML = shown.map((s, i) => `
+      <tr class="pick" data-i="${i}">
+        <td><b>${esc(s.code)}</b></td>
+        <td>${s.standard === "AS568" ? "AS568" : s.standard === "JIS_P" ? "JIS P" : "JIS G"}</td>
+        <td class="n">${n(s.id)}</td><td class="n">${n(s.cs)}</td><td class="n">${n(s.id + 2 * s.cs)}</td>
+        <td><button class="row-btn" type="button" data-i="${i}">帶入</button></td>
+      </tr>`).join("") + (sizeRows.length > shown.length ? `<tr><td colspan="6">只顯示前 ${shown.length} 筆，請輸入代號或內徑縮小範圍</td></tr>` : "");
+  }
+  $("sizeBody").onclick = (e) => {
+    const row = e.target.closest("[data-i]"); if (!row) return;
+    const s = sizeRows[Number(row.dataset.i)];
+    state.mm.id = s.id; state.mm.cs = s.cs; state.sizeLabel = Core.displayName(s);
+    writeFields(); renderDesign(); showTab("design");
+  };
+
+  // ---- 材質 ----
+  function renderMediaChips() {
+    $("mediaChips").innerHTML = Object.entries(Core.Media).map(([k, l]) =>
+      `<button class="chip" type="button" data-k="${k}" aria-pressed="${state.media.includes(k)}">${esc(l)}</button>`).join("");
+  }
+  $("mediaChips").onclick = (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    const k = b.dataset.k;
+    state.media = state.media.includes(k) ? state.media.filter((x) => x !== k) : [...state.media, k];
+    renderMediaChips(); renderMaterials(); save();
+  };
+  ["t-min", "t-max"].forEach((id) => $(id).addEventListener("input", () => {
+    state.tMin = $("t-min").value; state.tMax = $("t-max").value; renderMaterials(); save();
+  }));
+  function renderMaterials() {
+    const lo = /^-?\d+$/.test(state.tMin.trim()) ? Number(state.tMin) : NaN;
+    const hi = /^-?\d+$/.test(state.tMax.trim()) ? Number(state.tMax) : NaN;
+    const err = $("matErr");
+    if (isNaN(lo) || isNaN(hi) || lo > hi) {
+      err.hidden = false; err.textContent = "請輸入有效的溫度範圍（整數，最低 ≤ 最高）";
+      $("matCards").innerHTML = ""; return;
+    }
+    err.hidden = true;
+    const evals = Core.evaluate(lo, hi, state.media, state.service);
+    $("matCards").innerHTML = evals.map((e) => {
+      const m = e.material;
+      const cls = !e.suitable ? "no" : e.cautions.length ? "warn" : "ok";
+      const sel = m.code === state.material ? " sel" : "";
+      const rates = state.media.map((md) =>
+        `<span class="pill ${m.res[md]}">${esc(Core.Media[md].replace(/（.*）/, ""))}：${Core.Ratings[m.res[md]].label}</span>`).join("");
+      const why = [...e.problems.map((p) => `<div class="p">✗ ${esc(p)}</div>`), ...e.cautions.map((c) => `<div class="c">! ${esc(c)}</div>`)].join("");
+      return `<button type="button" class="mcard ${cls}${sel}" data-k="${m.code}" aria-pressed="${!!sel}">
+        <span class="top"><b>${e.suitable ? "✓" : "✗"} ${esc(Core.matLabel(m))}</b><span class="num">${m.min}～${m.max}°C</span></span>
+        <span class="note">${esc(m.note)}</span>
+        ${rates ? `<span class="rates">${rates}</span>` : ""}
+        ${why ? `<span class="why">${why}</span>` : ""}
+      </button>`;
+    }).join("");
+  }
+  $("matCards").onclick = (e) => {
+    const b = e.target.closest("[data-k]"); if (!b) return;
+    state.material = b.dataset.k; save(); renderMaterials(); renderDesign(); showTab("design");
+  };
+
+  // ---- 初始化 ----
+  $("t-min").value = state.tMin; $("t-max").value = state.tMax;
+  renderUnit(); renderTabs(); renderSealControls(); writeFields(); renderDesign();
+  renderStdChips(); renderMediaChips();
+  if (state.tab === "sizes") renderSizes();
+  if (state.tab === "material") renderMaterials();
+})();
+</script>
+</body></html>
