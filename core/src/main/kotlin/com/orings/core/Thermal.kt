@@ -1,13 +1,49 @@
 package com.orings.core
 
-/** 金屬件材質與線膨脹係數（1/°C，室溫附近的近似值） */
-enum class HardwareMaterial(val label: String, val cte: Double) {
-    STEEL("碳鋼", 11.5e-6),
-    STAINLESS("不鏽鋼 304", 17.3e-6),
-    ALUMINUM("鋁合金", 23.0e-6),
-    BRASS("黃銅", 19.0e-6),
-    CAST_IRON("鑄鐵", 10.5e-6),
-    TITANIUM("鈦合金", 8.6e-6),
+/** 溝槽件材質類別 */
+enum class HardwareCategory(val label: String) {
+    METAL("金屬"),
+    PLASTIC("塑膠"),
+}
+
+/**
+ * 溝槽件（缸筒、活塞、殼體、法蘭）材質與線膨脹係數（1/°C，室溫附近的近似值）。
+ * 前六項的名稱沿用舊版，以便讀回舊的存檔。
+ * 塑膠的膨脹係數依配方、纖維方向差異很大，玻纖強化品取流動方向的近似值。
+ */
+enum class HardwareMaterial(val category: HardwareCategory, val label: String, val cte: Double) {
+    // ---- 金屬 ----
+    STEEL(HardwareCategory.METAL, "碳鋼 S45C（1045）", 11.5e-6),
+    ALLOY_STEEL(HardwareCategory.METAL, "合金鋼 SCM440（4140）", 12.3e-6),
+    STAINLESS(HardwareCategory.METAL, "不鏽鋼 SUS304", 17.3e-6),
+    STAINLESS_316(HardwareCategory.METAL, "不鏽鋼 SUS316", 16.0e-6),
+    STAINLESS_420(HardwareCategory.METAL, "不鏽鋼 SUS420J2", 10.3e-6),
+    STAINLESS_440C(HardwareCategory.METAL, "不鏽鋼 SUS440C", 10.2e-6),
+    ALUMINUM(HardwareCategory.METAL, "鋁合金 6061-T6", 23.6e-6),
+    ALUMINUM_7075(HardwareCategory.METAL, "鋁合金 7075-T6", 23.4e-6),
+    ALUMINUM_5052(HardwareCategory.METAL, "鋁合金 5052", 23.8e-6),
+    ALUMINUM_DIECAST(HardwareCategory.METAL, "鋁壓鑄 ADC12", 21.0e-6),
+    BRASS(HardwareCategory.METAL, "黃銅 C3604", 20.5e-6),
+    BRONZE(HardwareCategory.METAL, "磷青銅 C5191", 18.2e-6),
+    CAST_IRON(HardwareCategory.METAL, "鑄鐵 FC250", 10.5e-6),
+    DUCTILE_IRON(HardwareCategory.METAL, "球墨鑄鐵 FCD450", 11.2e-6),
+    TITANIUM(HardwareCategory.METAL, "鈦合金 Ti-6Al-4V", 8.6e-6),
+    INCONEL(HardwareCategory.METAL, "鎳基合金 Inconel 718", 13.0e-6),
+
+    // ---- 塑膠 ----
+    POM(HardwareCategory.PLASTIC, "POM 聚甲醛", 110e-6),
+    PA66(HardwareCategory.PLASTIC, "PA66 尼龍", 85e-6),
+    PA66_GF30(HardwareCategory.PLASTIC, "PA66+GF30 玻纖尼龍", 25e-6),
+    PBT_GF30(HardwareCategory.PLASTIC, "PBT+GF30", 25e-6),
+    PPS_GF40(HardwareCategory.PLASTIC, "PPS+GF40", 20e-6),
+    PEEK(HardwareCategory.PLASTIC, "PEEK", 47e-6),
+    PEEK_GF30(HardwareCategory.PLASTIC, "PEEK+GF30", 22e-6),
+    PTFE(HardwareCategory.PLASTIC, "PTFE 鐵氟龍", 120e-6),
+    UHMWPE(HardwareCategory.PLASTIC, "UHMW-PE 超高分子量聚乙烯", 170e-6),
+    PP(HardwareCategory.PLASTIC, "PP 聚丙烯", 150e-6),
+    PVC(HardwareCategory.PLASTIC, "PVC 硬質", 70e-6),
+    PC(HardwareCategory.PLASTIC, "PC 聚碳酸酯", 68e-6),
+    ABS(HardwareCategory.PLASTIC, "ABS", 90e-6),
 }
 
 /**

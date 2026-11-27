@@ -24,7 +24,7 @@ class DesignReportTest {
         val r = DesignReport.build(base)
         assertEquals(DesignReport.Verdict.OK, r.verdict)
         assertEquals(
-            listOf("基本資料", "O 型環", "溝槽", "計算結果（組裝溫度）", "表面粗糙度建議（靜態）", "注意事項"),
+            listOf("基本資料", "O 型環", "溝槽", "計算結果（組裝溫度）", "預壓量（含公差）", "表面粗糙度建議（靜態）", "注意事項"),
             titles(r),
         )
         val text = DesignReport.toText(r)

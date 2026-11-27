@@ -171,6 +171,7 @@ tr.pick:hover td { background: var(--accent-soft); }
 .hint b { color: var(--ink); font-weight: 600; }
 .lede { margin: 0; color: var(--muted); font-size: .92rem; }
 .metric .v.sm { font-size: 1.1rem; }
+.select { font: inherit; width: 100%; max-width: 520px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--ink); }
 .save-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
 .save-row .field { flex: 1 1 200px; }
 .saved-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
@@ -253,9 +254,19 @@ tr.pick:hover td { background: var(--accent-soft); }
             <div class="field"><label for="th-min">最低溫度（留空則不修正）</label><div class="input"><input id="th-min" inputmode="numeric"><span class="unit">°C</span></div></div>
             <div class="field"><label for="th-max">最高溫度</label><div class="input"><input id="th-max" inputmode="numeric"><span class="unit">°C</span></div></div>
           </div>
-          <span class="sub">金屬件材質</span>
-          <div class="seg" role="group" aria-label="金屬件材質" id="hwSeg"></div>
+          <label class="sub" for="hwSel">溝槽件材質（缸筒、活塞、殼體）</label>
+          <select class="select" id="hwSel"></select>
           <div class="hint" id="cteHint"></div>
+        </div>
+
+        <div class="group">
+          <h2>預壓量公差</h2>
+          <div class="fields">
+            <div class="field"><label for="sq-cs">線徑公差 ±（留空自動）</label><div class="input"><input id="sq-cs" inputmode="decimal"><span class="unit u"></span></div></div>
+            <div class="field"><label for="sq-depth">溝槽深度公差 ±</label><div class="input"><input id="sq-depth" inputmode="decimal"><span class="unit u"></span></div></div>
+          </div>
+          <div class="chips"><button class="chip" type="button" id="sqEcc" aria-pressed="true">計入偏心（偏心量 = 擠出間隙）</button></div>
+          <div class="hint">線徑公差留空時依 AS568／JIS 規格自動帶入。</div>
         </div>
 
         <div class="group" id="candBox" hidden>
@@ -279,6 +290,14 @@ tr.pick:hover td { background: var(--accent-soft); }
         <dl class="facts" id="facts"></dl>
         <ul class="issues" id="issues"></ul>
         <div class="error" id="err" hidden></div>
+        <div class="group" id="sqBox" hidden>
+          <h2>預壓量（含公差）</h2>
+          <div id="sqVerdict" class="verdict"></div>
+          <dl class="facts" id="sqFacts"></dl>
+          <ul class="issues" id="sqIssues"></ul>
+          <p class="note-foot">最小預壓：線徑取下限、溝槽深度取上限（含偏心）；最大預壓反之。判定門檻為一般經驗值。</p>
+        </div>
+
         <div class="group">
           <h2>儲存與報告</h2>
           <div class="save-row">
@@ -345,8 +364,8 @@ tr.pick:hover td { background: var(--accent-soft); }
             <div class="field"><label for="rth-min">最低溫度（留空則不修正）</label><div class="input"><input id="rth-min" inputmode="numeric"><span class="unit">°C</span></div></div>
             <div class="field"><label for="rth-max">最高溫度</label><div class="input"><input id="rth-max" inputmode="numeric"><span class="unit">°C</span></div></div>
           </div>
-          <span class="sub">金屬件材質</span>
-          <div class="seg" role="group" aria-label="金屬件材質" id="rhwSeg"></div>
+          <label class="sub" for="rhwSel">溝槽件材質（缸筒、活塞、殼體）</label>
+          <select class="select" id="rhwSel"></select>
           <div class="hint" id="rcteHint"></div>
         </div>
       </div>
@@ -867,14 +886,39 @@ const Core = (() => {
   const matLabel = (m) => `${m.code}（${m.name}）`;
 
   // ---- 熱膨脹修正（與 Kotlin Thermal 相同） ----
-  const HardwareMaterials = {
-    STEEL: { key: "STEEL", label: "碳鋼", cte: 11.5e-6 },
-    STAINLESS: { key: "STAINLESS", label: "不鏽鋼 304", cte: 17.3e-6 },
-    ALUMINUM: { key: "ALUMINUM", label: "鋁合金", cte: 23.0e-6 },
-    BRASS: { key: "BRASS", label: "黃銅", cte: 19.0e-6 },
-    CAST_IRON: { key: "CAST_IRON", label: "鑄鐵", cte: 10.5e-6 },
-    TITANIUM: { key: "TITANIUM", label: "鈦合金", cte: 8.6e-6 },
-  };
+  // 溝槽件材質（與 Kotlin HardwareMaterial 相同；前六項沿用舊名稱）
+  const HardwareCategories = { METAL: "金屬", PLASTIC: "塑膠" };
+  const HardwareMaterials = Object.fromEntries([
+    ["STEEL", "METAL", "碳鋼 S45C（1045）", 11.5e-6],
+    ["ALLOY_STEEL", "METAL", "合金鋼 SCM440（4140）", 12.3e-6],
+    ["STAINLESS", "METAL", "不鏽鋼 SUS304", 17.3e-6],
+    ["STAINLESS_316", "METAL", "不鏽鋼 SUS316", 16.0e-6],
+    ["STAINLESS_420", "METAL", "不鏽鋼 SUS420J2", 10.3e-6],
+    ["STAINLESS_440C", "METAL", "不鏽鋼 SUS440C", 10.2e-6],
+    ["ALUMINUM", "METAL", "鋁合金 6061-T6", 23.6e-6],
+    ["ALUMINUM_7075", "METAL", "鋁合金 7075-T6", 23.4e-6],
+    ["ALUMINUM_5052", "METAL", "鋁合金 5052", 23.8e-6],
+    ["ALUMINUM_DIECAST", "METAL", "鋁壓鑄 ADC12", 21.0e-6],
+    ["BRASS", "METAL", "黃銅 C3604", 20.5e-6],
+    ["BRONZE", "METAL", "磷青銅 C5191", 18.2e-6],
+    ["CAST_IRON", "METAL", "鑄鐵 FC250", 10.5e-6],
+    ["DUCTILE_IRON", "METAL", "球墨鑄鐵 FCD450", 11.2e-6],
+    ["TITANIUM", "METAL", "鈦合金 Ti-6Al-4V", 8.6e-6],
+    ["INCONEL", "METAL", "鎳基合金 Inconel 718", 13.0e-6],
+    ["POM", "PLASTIC", "POM 聚甲醛", 110e-6],
+    ["PA66", "PLASTIC", "PA66 尼龍", 85e-6],
+    ["PA66_GF30", "PLASTIC", "PA66+GF30 玻纖尼龍", 25e-6],
+    ["PBT_GF30", "PLASTIC", "PBT+GF30", 25e-6],
+    ["PPS_GF40", "PLASTIC", "PPS+GF40", 20e-6],
+    ["PEEK", "PLASTIC", "PEEK", 47e-6],
+    ["PEEK_GF30", "PLASTIC", "PEEK+GF30", 22e-6],
+    ["PTFE", "PLASTIC", "PTFE 鐵氟龍", 120e-6],
+    ["UHMWPE", "PLASTIC", "UHMW-PE 超高分子量聚乙烯", 170e-6],
+    ["PP", "PLASTIC", "PP 聚丙烯", 150e-6],
+    ["PVC", "PLASTIC", "PVC 硬質", 70e-6],
+    ["PC", "PLASTIC", "PC 聚碳酸酯", 68e-6],
+    ["ABS", "PLASTIC", "ABS", 90e-6],
+  ].map(([key, category, label, cte]) => [key, { key, category, label, cte }]));
   const HOT_FILL_TARGET = 0.80;
   function thermalInput(tMinC, tMaxC, ringCte, hardwareCte, assemblyC = 20.0) {
     if (tMinC > tMaxC) throw new Error("最低溫度不能高於最高溫度");
@@ -927,6 +971,52 @@ const Core = (() => {
       return { material: m, score, problems, cautions, suitable: problems.length === 0, idx };
     }).sort((a, b) => (b.suitable - a.suitable) || (b.score - a.score) || (a.idx - b.idx));
   }
+
+  // ---- 預壓量（與 Kotlin Squeeze 相同） ----
+  const MIN_SQUEEZE_MM = 0.10, WORST_CASE_MARGIN = 0.05;
+  const knownTolerances = [[1.78, 0.076], [1.90, 0.08], [2.40, 0.09], [2.62, 0.076], [3.10, 0.10], [3.50, 0.10],
+    [3.53, 0.102], [5.33, 0.127], [5.70, 0.13], [6.99, 0.152], [8.40, 0.15]];
+  function csTolerance(cs) {
+    const hit = knownTolerances.find(([c]) => Math.abs(c - cs) <= 0.03);
+    if (hit) return hit[1];
+    const sorted = [...knownTolerances].sort((a, b) => a[0] - b[0]);
+    if (cs <= sorted[0][0]) return sorted[0][1];
+    if (cs >= sorted[sorted.length - 1][0]) return sorted[sorted.length - 1][1];
+    let i = 0;
+    for (let k = 0; k < sorted.length; k++) if (sorted[k][0] <= cs) i = k;
+    const [x0, y0] = sorted[i], [x1, y1] = sorted[i + 1];
+    return y0 + (y1 - y0) * (cs - x0) / (x1 - x0);
+  }
+  function squeezeAnalyze(ring, g, service = "STATIC", csTol = null, depthTol = 0.05, eccentricity = 0, limits = limitsFor(g.type, service)) {
+    if (depthTol < 0) throw new Error("溝槽深度公差不能是負數");
+    if (eccentricity < 0) throw new Error("偏心量不能是負數");
+    const base = calculate(ring, g, service, limits);
+    const k = base.cs / ring.cs, cs = base.cs;
+    const rawTol = csTol !== null ? csTol : csTolerance(ring.cs);
+    if (rawTol < 0) throw new Error("線徑公差不能是負數");
+    const tol = rawTol * k;
+    const ecc = g.type === "FACE" ? 0 : eccentricity;
+    const d = base.depth;
+    const nominal = cs - d;
+    const minMm = (cs - tol) - (d + depthTol + ecc);
+    const maxMm = (cs + tol) - (d - depthTol - ecc);
+    const minPct = minMm / (cs - tol), maxPct = maxMm / (cs + tol);
+    const mmS = (v) => v.toFixed(3) + " mm";
+    const issues = [];
+    const add = (severity, code, message) => issues.push({ severity, code, message });
+    const floor = limits.minC - WORST_CASE_MARGIN, ceiling = limits.maxC + WORST_CASE_MARGIN;
+    if (minMm <= 0) add("ERROR", "SQUEEZE_NONE", `公差最差時沒有預壓量（${mmS(minMm)}），會洩漏`);
+    else if (minPct < floor) add("WARNING", "SQUEEZE_LOW", `公差最差時預壓率只有 ${pct(minPct)}，低於 ${pct(floor)}，密封可能不足`);
+    if (minMm > 0 && minMm < MIN_SQUEEZE_MM) add("WARNING", "SQUEEZE_SMALL", `公差最差時預壓量只有 ${mmS(minMm)}，小於 ${mmS(MIN_SQUEEZE_MM)}，請縮小公差`);
+    if (maxPct > HARD_MAX_COMPRESSION) add("ERROR", "SQUEEZE_OVER", `公差最差時預壓率達 ${pct(maxPct)}，O 型環會永久變形或裝不進去`);
+    else if (maxPct > ceiling) add("WARNING", "SQUEEZE_HIGH", `公差最差時預壓率達 ${pct(maxPct)}，高於 ${pct(ceiling)}，安裝力大、易永久變形`);
+    return { nominalMm: nominal, nominalPct: nominal / cs, minMm, minPct, maxMm, maxPct, csTolerance: tol,
+      depthTolerance: depthTol, eccentricity: ecc, limits, issues, isOk: !issues.some((i) => i.severity === "ERROR") };
+  }
+  const recordSqueeze = (rec) => squeezeAnalyze(oring(rec.ringId, rec.ringCs), recordGland(rec), rec.service,
+    rec.csTolerance === undefined ? null : rec.csTolerance,
+    rec.depthTolerance === undefined ? 0.05 : rec.depthTolerance,
+    (rec.eccentric === undefined ? true : rec.eccentric) && rec.sealType !== "FACE" ? rec.radialGap : 0);
 
   // ---- 設計存檔與報告（與 Kotlin DesignReport 相同的內容與文字） ----
   const unitLabel = { MM: "公制 mm", INCH: "英制 inch" };
@@ -986,6 +1076,18 @@ const Core = (() => {
     if (op && op.backupRings > 0) calcRows.push(["扣擋圈後溝槽寬", len(result.effWidth)]);
     const calcNotes = result.issues.map(issueLine);
     sections.push({ title: "計算結果（組裝溫度）", rows: calcRows, notes: calcNotes.length ? calcNotes : ["無問題"] });
+    const sq = recordSqueeze(rec);
+    const autoTol = rec.csTolerance === undefined || rec.csTolerance === null;
+    const eccOn = rec.eccentric === undefined ? true : rec.eccentric;
+    const sqRows = [
+      ["預壓量（名目）", `${len(sq.nominalMm)}（${pc(sq.nominalPct)}）`],
+      ["線徑公差", "±" + len(sq.csTolerance) + (autoTol ? "（自動）" : "")],
+      ["溝槽深度公差", "±" + len(sq.depthTolerance)],
+    ];
+    if (rec.sealType !== "FACE") sqRows.push(["偏心", eccOn ? len(sq.eccentricity) : "不計"]);
+    sqRows.push(["最小預壓量", `${len(sq.minMm)}（${pc(sq.minPct)}）`], ["最大預壓量", `${len(sq.maxMm)}（${pc(sq.maxPct)}）`]);
+    const sqNotes = sq.issues.map(issueLine);
+    sections.push({ title: "預壓量（含公差）", rows: sqRows, notes: sqNotes.length ? sqNotes : ["公差範圍內預壓量皆合格"] });
     if (op && rec.pressureMpa !== null) {
       const r2 = Extrusion.recommend(rec.pressureMpa, rec.radialGap);
       const pu = PressureUnits[rec.pressureUnit];
@@ -1018,8 +1120,8 @@ const Core = (() => {
     sections.push({ title: "注意事項", rows: [], notes: [
       "建議範圍、擠出極限、膨脹係數與表面粗糙度皆為一般工業經驗值，正式設計請以材質與密封件廠商型錄為準。",
       "標準尺寸依 SAE AS568 與 JIS B2401 規則整理，使用前請與標準原文核對。"] });
-    const anyError = !result.isOk || (thermal && !thermal.isOk);
-    const anyWarning = result.issues.length > 0 ||
+    const anyError = !result.isOk || (thermal && !thermal.isOk) || !sq.isOk;
+    const anyWarning = result.issues.length > 0 || sq.issues.length > 0 ||
       (thermal && (thermal.notes.length > 0 || thermal.points.some((p) => p.result.issues.length > 0)));
     const verdict = anyError ? "ERROR" : anyWarning ? "WARNING" : "OK";
     return { title: "O 型環溝槽設計報告", subtitle: `${rec.name}　${rec.savedAt}`, verdict, verdictLabel: Verdicts[verdict], sections };
@@ -1036,7 +1138,7 @@ const Core = (() => {
 
   return {
     SealType, Service, Units, Standards, Media, Ratings, Materials,
-    designReport, reportText, recordGland,
+    designReport, reportText, recordGland, squeezeAnalyze, csTolerance, HardwareCategories,
     Hardness, hardnessKeys, PressureUnits, Extrusion, operating, designRing,
     Surfaces, UIN_PER_UM, surfaceFinish,
     HardwareMaterials, HOT_FILL_TARGET, thermalInput, thermalOf, thermalAt, thermalAnalyze, hotFillFactor,
@@ -1082,6 +1184,9 @@ if (typeof module !== "undefined") module.exports = Core;
     rseal: store.get("rseal", "PISTON"),
     sfStrict: store.get("sfStrict", false),
     keepMate: store.get("keepMate", false),
+    sqCsTol: store.get("sqCsTol", null), // mm；null = 自動
+    sqDepthTol: store.get("sqDepthTol", 0.05),
+    sqEcc: store.get("sqEcc", true),
     thMin: store.get("thMin", "-20"),
     thMax: store.get("thMax", "80"),
     hw: store.get("hw", "STEEL"),
@@ -1091,7 +1196,7 @@ if (typeof module !== "undefined") module.exports = Core;
   const fieldIds = { id: "f-id", cs: "f-cs", mate: "f-mate", groove: "f-groove", width: "f-width", face: "f-face" };
   const unit = () => Core.Units[state.unit];
   const save = () => ["tab", "unit", "seal", "service", "mm", "sizeLabel", "material", "tMin", "tMax", "media", "stds",
-    "pUnit", "pText", "gapMm", "hard", "bak", "rseal", "rmm", "sfStrict", "thMin", "thMax", "hw", "keepMate"].forEach((k) => store.set(k, state[k]));
+    "pUnit", "pText", "gapMm", "hard", "bak", "rseal", "rmm", "sfStrict", "thMin", "thMax", "hw", "keepMate", "sqCsTol", "sqDepthTol", "sqEcc"].forEach((k) => store.set(k, state[k]));
 
   function segment(el, items, current, onPick) {
     el.innerHTML = items.map(([k, label]) =>
@@ -1133,6 +1238,8 @@ if (typeof module !== "undefined") module.exports = Core;
       if ("r-" + k === except) continue;
       $(id).value = Core.fmtUnit(unit(), state.rmm[k]);
     }
+    if (except !== "sq-cs") $("sq-cs").value = state.sqCsTol === null ? "" : Core.fmtUnit(unit(), state.sqCsTol);
+    if (except !== "sq-depth") $("sq-depth").value = Core.fmtUnit(unit(), state.sqDepthTol);
     ["d", "r"].forEach((px) => {
       if (px + "-gap" !== except) $(px + "-gap").value = Core.fmtUnit(unit(), state.gapMm);
       if (px + "-p" !== except) $(px + "-p").value = state.pText;
@@ -1274,7 +1381,7 @@ if (typeof module !== "undefined") module.exports = Core;
       err.hidden = false; err.textContent = e.message;
       $("verdict").className = "verdict bad"; $("verdict").textContent = "無法計算";
       $("metrics").innerHTML = ""; $("facts").innerHTML = ""; $("issues").innerHTML = ""; $("diagram").innerHTML = "";
-      $("thBox").hidden = true;
+      $("thBox").hidden = true; $("sqBox").hidden = true;
       return;
     }
     err.hidden = !inputError; err.textContent = inputError || "";
@@ -1307,6 +1414,7 @@ if (typeof module !== "undefined") module.exports = Core;
     $("issues").innerHTML = res.issues.map((i) => `<li class="${i.severity}">${esc(i.message)}</li>`).join("");
     drawSection(res, g, op ? op.backupRings : 0, ring.cs);
     renderThermal(ring, g, op);
+    renderSqueeze(ring, g);
   }
 
   // 截面示意：溝槽寬 × 深依比例；壓縮後的 O 型環用等面積橢圓近似
@@ -1419,11 +1527,14 @@ if (typeof module !== "undefined") module.exports = Core;
   function renderThermalInputs(except) {
     const m = selectedMaterial();
     const hint = `O 型環膨脹係數：${m ? m.code : "NBR（未選材質，預設）"} ${((m ? m.cte : 1.3e-4) * 1e4).toFixed(1)}×10⁻⁴/°C；` +
-      `金屬 ${(Core.HardwareMaterials[state.hw].cte * 1e6).toFixed(1)}×10⁻⁶/°C`;
+      `溝槽件 ${(Core.HardwareMaterials[state.hw].cte * 1e6).toFixed(1)}×10⁻⁶/°C`;
+    const options = Object.entries(Core.HardwareCategories).map(([cat, catLabel]) =>
+      `<optgroup label="${catLabel}">${Object.values(Core.HardwareMaterials).filter((h) => h.category === cat).map((h) =>
+        `<option value="${h.key}"${h.key === state.hw ? " selected" : ""}>${esc(h.label)}（${(h.cte * 1e6).toFixed(1)}×10⁻⁶/°C）</option>`).join("")}</optgroup>`).join("");
     [["", "th"], ["r", "rth"]].forEach(([px, tp]) => {
-      segment($(px + "hwSeg"), Object.values(Core.HardwareMaterials).map((h) => [h.key, h.label]), state.hw, (k) => {
-        state.hw = k; renderThermalInputs(); renderDesign(); renderRing(); save();
-      });
+      const sel = $(px + "hwSel");
+      sel.innerHTML = options;
+      sel.onchange = () => { state.hw = sel.value; renderThermalInputs(); renderDesign(); renderRing(); save(); };
       $(px + "cteHint").textContent = hint;
       // 兩個分頁共用溫度；正在輸入的欄位不覆寫
       if (tp + "-min" !== except) $(tp + "-min").value = state.thMin;
@@ -1468,6 +1579,46 @@ if (typeof module !== "undefined") module.exports = Core;
     ].join("");
   }
 
+  // ---- 預壓量 ----
+  $("sq-cs").addEventListener("input", (e) => {
+    const t = e.target.value.trim();
+    if (t === "") state.sqCsTol = null;
+    else { const v = Core.parseUnit(unit(), t); if (v !== null && v >= 0) state.sqCsTol = v; }
+    renderDesign(); save();
+  });
+  $("sq-depth").addEventListener("input", (e) => {
+    const v = Core.parseUnit(unit(), e.target.value);
+    if (v !== null && v >= 0) state.sqDepthTol = v;
+    renderDesign(); save();
+  });
+  ["sq-cs", "sq-depth"].forEach((id) => $(id).addEventListener("blur", () => writeFields()));
+  $("sqEcc").onclick = () => { state.sqEcc = !state.sqEcc; renderDesign(); save(); };
+  function renderSqueeze(ring, g) {
+    const box = $("sqBox");
+    $("sqEcc").setAttribute("aria-pressed", String(state.sqEcc));
+    $("sqEcc").hidden = g.type === "FACE";
+    $("sq-cs").placeholder = "自動 " + Core.fmtUnit(unit(), Core.csTolerance(ring.cs));
+    let r;
+    try {
+      r = Core.squeezeAnalyze(ring, g, state.service, state.sqCsTol, state.sqDepthTol, state.sqEcc ? state.gapMm : 0);
+    } catch (e) { box.hidden = true; return; }
+    box.hidden = false;
+    const u = unit(), mp = (mm, p) => `${Core.fmtUnit(u, mm)} ${u.symbol}（${(p * 100).toFixed(1)}%）`;
+    const v = $("sqVerdict");
+    if (!r.isOk) { v.className = "verdict bad"; v.textContent = "✗ 預壓量不合格"; }
+    else if (r.issues.length) { v.className = "verdict warn"; v.textContent = "! 預壓量有警告"; }
+    else { v.className = "verdict ok"; v.textContent = "✓ 公差範圍內預壓量皆合格"; }
+    $("sqFacts").innerHTML = [
+      ["預壓量（名目）", mp(r.nominalMm, r.nominalPct)],
+      ["最小（公差最差）", mp(r.minMm, r.minPct)],
+      ["最大（公差最差）", mp(r.maxMm, r.maxPct)],
+      ["線徑公差", "±" + Core.fmtUnit(u, r.csTolerance) + " " + u.symbol + (state.sqCsTol === null ? "（自動）" : "")],
+      ["溝槽深度公差", "±" + Core.fmtUnit(u, r.depthTolerance) + " " + u.symbol],
+      ...(g.type !== "FACE" ? [["偏心", state.sqEcc ? Core.fmtUnit(u, r.eccentricity) + " " + u.symbol : "不計"]] : []),
+    ].map(([k, val]) => `<dt>${k}</dt><dd>${esc(val)}</dd>`).join("");
+    $("sqIssues").innerHTML = r.issues.map((i) => `<li class="${i.severity}">${esc(i.message)}</li>`).join("");
+  }
+
   // ---- 存檔與 PDF ----
   let records = store.get("records", []);
   const saveRecords = () => store.set("records", records);
@@ -1491,6 +1642,7 @@ if (typeof module !== "undefined") module.exports = Core;
       materialCode: state.material, pressureMpa: o.pressure, pressureUnit: state.pUnit, radialGap: state.gapMm,
       hardness: state.hard === "AUTO" ? null : state.hard, backupRings: state.bak === "AUTO" ? null : Number(state.bak),
       tMinC: th ? th.tMinC : null, tMaxC: th ? th.tMaxC : null, hardware: state.hw, strictSurface: state.sfStrict,
+      csTolerance: state.sqCsTol, depthTolerance: state.sqDepthTol, eccentric: state.sqEcc,
     };
   }
 
@@ -1518,7 +1670,12 @@ if (typeof module !== "undefined") module.exports = Core;
       bak: rec.backupRings === null ? "AUTO" : rec.backupRings, hw: rec.hardware, sfStrict: rec.strictSurface,
       thMin: rec.tMinC === null ? "" : Core.fmtUnit(Core.Units.MM, rec.tMinC),
       thMax: rec.tMaxC === null ? "" : Core.fmtUnit(Core.Units.MM, rec.tMaxC),
+      // 舊存檔沒有這些欄位時用預設值
+      sqCsTol: rec.csTolerance === undefined ? null : rec.csTolerance,
+      sqDepthTol: rec.depthTolerance === undefined ? 0.05 : rec.depthTolerance,
+      sqEcc: rec.eccentric === undefined ? true : rec.eccentric,
     });
+    if (!Core.HardwareMaterials[state.hw]) state.hw = "STEEL";
     const pu = Core.PressureUnits[rec.pressureUnit];
     state.pText = rec.pressureMpa === null ? ""
       : (rec.pressureMpa / pu.per).toFixed(pu.decimals).replace(/0+$/, "").replace(/\.$/, "");

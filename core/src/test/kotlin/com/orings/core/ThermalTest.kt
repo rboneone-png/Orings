@@ -14,7 +14,14 @@ class ThermalTest {
     @Test
     fun allMaterialsHaveReasonableCte() {
         Materials.all.forEach { assertTrue(it.code, it.cte in 0.5e-4..4e-4) }
-        HardwareMaterial.entries.forEach { assertTrue(it.name, it.cte in 5e-6..30e-6) }
+        HardwareMaterial.entries.forEach {
+            val range = if (it.category == HardwareCategory.METAL) 5e-6..30e-6 else 15e-6..250e-6
+            assertTrue(it.name, it.cte in range)
+        }
+        // 兩類都有，且名稱不重複
+        assertTrue(HardwareMaterial.entries.count { it.category == HardwareCategory.METAL } >= 10)
+        assertTrue(HardwareMaterial.entries.count { it.category == HardwareCategory.PLASTIC } >= 10)
+        assertEquals(HardwareMaterial.entries.size, HardwareMaterial.entries.map { it.label }.toSet().size)
         // 橡膠膨脹係數約為鋼的 10 倍以上
         assertTrue(Materials.all.minOf { it.cte } > 10 * HardwareMaterial.STEEL.cte)
     }

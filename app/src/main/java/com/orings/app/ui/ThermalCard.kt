@@ -6,7 +6,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.runtime.remember
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -21,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.orings.core.HardwareCategory
 import com.orings.core.HardwareMaterial
 import com.orings.core.Material
 import com.orings.core.Severity
@@ -81,15 +87,52 @@ fun ThermalInputSection(state: ThermalInputState, material: Material?) {
                 modifier = Modifier.weight(1f),
             )
         }
-        Text("金屬件材質", style = MaterialTheme.typography.labelMedium)
-        ChipRow(HardwareMaterial.entries, hardware, { it.label }, onHardware)
+        Text("溝槽件材質（缸筒、活塞、殼體）", style = MaterialTheme.typography.labelMedium)
+        HardwareDropdown(hardware, onHardware)
         Text(
             "O 型環膨脹係數：" + (material?.let { "${it.code} " } ?: "NBR（未選材質，預設）") +
                 String.format(Locale.US, "%.1f×10⁻⁴/°C", (material?.cte ?: 1.3e-4) * 1e4) +
-                String.format(Locale.US, "；金屬 %.1f×10⁻⁶/°C", hardware.cte * 1e6),
+                String.format(Locale.US, "；溝槽件 %.1f×10⁻⁶/°C", hardware.cte * 1e6),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/** 溝槽件材質下拉選單：依金屬、塑膠分組，顯示膨脹係數 */
+@Composable
+fun HardwareDropdown(selected: HardwareMaterial, onSelect: (HardwareMaterial) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    fun cteText(h: HardwareMaterial) = String.format(Locale.US, "%.1f×10⁻⁶/°C", h.cte * 1e6)
+    Box {
+        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                "${selected.category.label}｜${selected.label}　${cteText(selected)}　▾",
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            HardwareCategory.entries.forEach { cat ->
+                Text(
+                    cat.label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+                HardwareMaterial.entries.filter { it.category == cat }.forEach { h ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                (if (h == selected) "✓ " else "　") + h.label + "　" + cteText(h),
+                                fontWeight = if (h == selected) FontWeight.Bold else FontWeight.Normal,
+                            )
+                        },
+                        onClick = { onSelect(h); expanded = false },
+                    )
+                }
+                HorizontalDivider()
+            }
+        }
     }
 }
 

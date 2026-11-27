@@ -52,6 +52,9 @@ class DesignStore(context: Context) {
             put("tMaxC", r.tMaxC ?: JSONObject.NULL)
             put("hardware", r.hardware.name)
             put("strictSurface", r.strictSurface)
+            put("csTolerance", r.csTolerance ?: JSONObject.NULL)
+            put("depthTolerance", r.depthTolerance)
+            put("eccentric", r.eccentric)
         }
 
         private fun JSONObject.str(k: String): String? = if (isNull(k)) null else getString(k)
@@ -78,8 +81,12 @@ class DesignStore(context: Context) {
             backupRings = if (o.isNull("backupRings")) null else o.getInt("backupRings"),
             tMinC = o.dbl("tMinC"),
             tMaxC = o.dbl("tMaxC"),
-            hardware = HardwareMaterial.valueOf(o.getString("hardware")),
+            hardware = runCatching { HardwareMaterial.valueOf(o.getString("hardware")) }.getOrDefault(HardwareMaterial.STEEL),
             strictSurface = o.getBoolean("strictSurface"),
+            // 以下為 v0.7 新增，舊存檔沒有這些欄位時用預設值
+            csTolerance = if (o.has("csTolerance")) o.dbl("csTolerance") else null,
+            depthTolerance = o.optDouble("depthTolerance", 0.05),
+            eccentric = o.optBoolean("eccentric", true),
         )
     }
 }
