@@ -37,6 +37,9 @@ object GlandCalculator {
     /** 軸桿密封：周向擠壓超過此比例即判定錯誤 */
     const val ROD_COMPRESSION_ERROR = 0.06
 
+    /** 90A 硬度建議的壓縮率上限（太硬壓太多安裝困難、易永久變形） */
+    const val HARD_90A_MAX_COMPRESSION = 0.25
+
     /** 推薦設計時的目標填充率 */
     const val TARGET_FILL = 0.75
 
@@ -144,7 +147,7 @@ object GlandCalculator {
                 if (h == Hardness.A90 && p < 2.0 && backups == 0) {
                     add(Issue(Severity.WARNING, "HARD_LOW_PRESSURE", "壓力低於 2 MPa 時 90A 密封性較差，建議 70A"))
                 }
-                if (h == Hardness.A90 && compression > 0.25) {
+                if (h == Hardness.A90 && compression > HARD_90A_MAX_COMPRESSION) {
                     add(Issue(Severity.WARNING, "HARD_HIGH_SQUEEZE", "90A 壓縮率超過 25%，安裝力大且易永久變形"))
                 }
             }
@@ -164,78 +167,120 @@ object GlandCalculator {
     }
 
     /**
-     * 依 O 型環與配合尺寸，推薦溝槽尺寸：
-     * 壓縮率取建議範圍中間值，填充率取 [TARGET_FILL]。
+     * 目標拉伸率：活塞取上限的一半（略為撐緊、不易鬆脫）；
+     * 軸桿（中心徑）與端面取 0（不撐開也不擠壓）。
+     */
+    fun targetStretch(sealType: SealType, limits: DesignLimits): Double =
+        if (sealType == SealType.PISTON) limits.maxStretch / 2 else 0.0
+
+    /**
+     * 依 O 型環推薦整組溝槽尺寸，同時滿足壓縮率、拉伸率、填充率、擋圈與熱膨脹：
      *
-     * @param mateDiameter PISTON = 缸筒內徑；ROD = 軸桿外徑；FACE 不使用（溝槽內徑取 O 型環內徑）
+     * 1. 配合直徑：[mateDiameter] 為 null（或 ≤ 0）時一併推薦，讓拉伸率等於 [targetStretch]：
+     *    活塞 → 溝槽底徑 = ID × (1 + 目標拉伸)，缸筒內徑 = 溝槽底徑 + 2 × 深度；
+     *    軸桿 → 溝槽中心徑 = (ID + CS) × (1 + 目標拉伸)，軸徑 = 中心徑 − 深度；
+     *    端面 → 溝槽內徑 = ID。
+     *    有給值時固定該直徑（PISTON = 缸筒內徑、ROD = 軸桿外徑、FACE = 溝槽內徑），只推薦溝槽。
+     * 2. 溝槽深度：讓「最低溫與最高溫壓縮率的平均」等於建議範圍中間值；
+     *    沒有溫度時就是組裝溫度的壓縮率等於中間值。
+     * 3. 溝槽寬度：組裝時填充率 = [TARGET_FILL]，最高溫時 ≤ [Thermal.HOT_FILL_TARGET]，另加擋圈厚度。
      */
     fun suggest(
         ring: ORing,
         sealType: SealType,
         service: Service = Service.STATIC,
-        mateDiameter: Double = 0.0,
+        mateDiameter: Double? = null,
         limits: DesignLimits = DesignLimits.defaultFor(sealType, service),
         operating: Operating? = null,
         thermal: ThermalInput? = null,
     ): Gland {
-        val targetCompression = (limits.minCompression + limits.maxCompression) / 2
+        val fixed = mateDiameter?.takeIf { it > 0 }
+        // 90A 時壓縮率上限改為 25%，避免推薦出 90A 壓太多的溝槽
+        val maxC = if (operating?.hardness == Hardness.A90) minOf(limits.maxCompression, HARD_90A_MAX_COMPRESSION)
+        else limits.maxCompression
+        val tc = (limits.minCompression + maxC) / 2
+        // 有溫度時，讓「最低溫與最高溫拉伸率的平均」= 目標值：
+        // 拉伸率約為 (1 + 組裝拉伸) × (1 + αm·ΔT) / (1 + αr·ΔT) − 1
+        val ts = targetStretch(sealType, limits).let { target ->
+            if (thermal == null) target
+            else {
+                fun k(t: Double): Double {
+                    val dT = t - thermal.assemblyC
+                    return (1 + thermal.hardwareCte * dT) / (1 + thermal.ringCte * dT)
+                }
+                (1 + target) * 2 / (k(thermal.tMinC) + k(thermal.tMaxC)) - 1
+            }
+        }
         // 擋圈佔用的寬度要另外加上
         val backupWidth = (operating?.backupRings ?: 0) * Extrusion.backupThickness(ring.crossSection)
+        val id = ring.innerDiameter
+        val cs = ring.crossSection
 
-        fun dims(stretch: Double): Pair<Double, Double> {
-            val cs = effectiveCrossSection(ring.crossSection, stretch)
-            val depth = cs * (1 - targetCompression)
-            val width = max(PI * cs * cs / 4 / (depth * TARGET_FILL), cs * 1.05)
-            return depth to (width + backupWidth)
+        /** 依深度組出溝槽（寬度先給足，不影響壓縮率） */
+        fun build(depth: Double, width: Double = cs * 3 + backupWidth): Gland = when (sealType) {
+            SealType.PISTON -> {
+                val groove = if (fixed != null) fixed - 2 * depth else id * (1 + ts)
+                Gland(sealType, width, groove, fixed ?: (groove + 2 * depth))
+            }
+            SealType.ROD -> {
+                val mean = (id + cs) * (1 + ts)
+                val rod = fixed ?: (mean - depth)
+                Gland(sealType, width, rod + 2 * depth, rod)
+            }
+            SealType.FACE -> Gland(sealType, width, fixed ?: id, faceDepth = depth)
         }
+
+        /** 最低溫與最高溫壓縮率的平均；沒有溫度時為組裝溫度的壓縮率 */
+        fun meanCompression(depth: Double): Double {
+            val g = build(depth)
+            if (thermal == null) return calculate(ring, g, service, limits).compression
+            val (r1, g1) = Thermal.at(ring, g, thermal, thermal.tMinC)
+            val (r2, g2) = Thermal.at(ring, g, thermal, thermal.tMaxC)
+            return (calculate(r1, g1, service, limits).compression + calculate(r2, g2, service, limits).compression) / 2
+        }
+
+        if (sealType == SealType.PISTON && fixed != null) require(fixed > cs) { "缸筒內徑太小" }
+
+        // 壓縮率隨深度遞減，用二分法找出平均壓縮率 = 中間值的深度
+        var lo = cs * 0.3
+        // 固定缸筒內徑時，溝槽底徑不能小於 0
+        var hi = if (sealType == SealType.PISTON && fixed != null) minOf(cs * 1.2, fixed * 0.45) else cs * 1.2
+        repeat(60) {
+            val mid = (lo + hi) / 2
+            if (meanCompression(mid) > tc) lo = mid else hi = mid
+        }
+        val depth = round2((lo + hi) / 2)
+
+        // 尺寸取到 0.01 mm
+        val raw = build(depth)
+        val rounded = when (sealType) {
+            SealType.PISTON -> {
+                val groove = round2(raw.grooveDiameter)
+                Gland(sealType, raw.grooveWidth, groove, fixed ?: round2(groove + 2 * depth))
+            }
+            SealType.ROD -> {
+                val rod = fixed ?: round2(raw.mateDiameter)
+                Gland(sealType, raw.grooveWidth, round2(rod + 2 * depth), rod)
+            }
+            SealType.FACE -> Gland(sealType, raw.grooveWidth, fixed ?: round2(raw.grooveDiameter), faceDepth = depth)
+        }
+
+        // 寬度：組裝時填充率 = 目標值（以組裝溫度的有效線徑計算）
+        val room = calculate(ring, rounded, service, limits)
+        val effCs = room.effectiveCrossSection
+        val width = max(PI * effCs * effCs / 4 / (room.depth * TARGET_FILL), effCs * 1.05) + backupWidth
+        var gland = rounded.copy(grooveWidth = round2(width))
 
         // 高溫時 O 型環膨脹比溝槽多，填充率上升：用實際高溫計算的填充率回推所需寬度
-        fun widenForHeat(g: Gland): Gland {
-            if (thermal == null || thermal.tMaxC <= thermal.assemblyC) return g
-            val (hotRing, hotGland) = Thermal.at(ring, g, thermal, thermal.tMaxC)
+        if (thermal != null && thermal.tMaxC > thermal.assemblyC) {
+            val (hotRing, hotGland) = Thermal.at(ring, gland, thermal, thermal.tMaxC)
             val hotFill = calculate(hotRing, hotGland, service, limits, operating).fill
-            if (hotFill <= Thermal.HOT_FILL_TARGET) return g
-            val width = (g.grooveWidth - backupWidth) * hotFill / Thermal.HOT_FILL_TARGET + backupWidth
-            return g.copy(grooveWidth = ceil(width * 100) / 100)
-        }
-
-        val gland = when (sealType) {
-            SealType.PISTON -> {
-                require(mateDiameter > 0) { "請輸入缸筒內徑" }
-                // 溝槽底徑會影響拉伸率，拉伸率又影響有效線徑，迭代幾次收斂
-                var grooveDia = mateDiameter - 2 * ring.crossSection
-                var depth = 0.0
-                var width = 0.0
-                repeat(10) {
-                    val (d, w) = dims((grooveDia - ring.innerDiameter) / ring.innerDiameter)
-                    depth = d
-                    width = w
-                    grooveDia = mateDiameter - 2 * d
-                }
-                Gland(sealType, round2(width), round2(mateDiameter - 2 * round2(depth)), mateDiameter)
-            }
-
-            SealType.ROD -> {
-                require(mateDiameter > 0) { "請輸入軸桿外徑" }
-                // 溝槽底徑會影響中心徑與拉伸率，迭代幾次收斂
-                var grooveDia = mateDiameter + 2 * ring.crossSection
-                var depth = 0.0
-                var width = 0.0
-                repeat(10) {
-                    val (d, w) = dims(rodStretch(ring, mateDiameter, grooveDia))
-                    depth = d
-                    width = w
-                    grooveDia = mateDiameter + 2 * d
-                }
-                Gland(sealType, round2(width), round2(mateDiameter + 2 * round2(depth)), mateDiameter)
-            }
-
-            SealType.FACE -> {
-                val (depth, width) = dims(0.0)
-                Gland(sealType, round2(width), ring.innerDiameter, faceDepth = round2(depth))
+            if (hotFill > Thermal.HOT_FILL_TARGET) {
+                val w = (gland.grooveWidth - backupWidth) * hotFill / Thermal.HOT_FILL_TARGET + backupWidth
+                gland = gland.copy(grooveWidth = ceil(w * 100) / 100)
             }
         }
-        return widenForHeat(gland)
+        return gland
     }
 
     private fun round2(v: Double) = round(v * 100) / 100

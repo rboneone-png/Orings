@@ -91,6 +91,8 @@ fun GlandScreen(
     var thermalAnalysis by remember { mutableStateOf<Thermal.Analysis?>(null) }
     var candidates by remember { mutableStateOf<List<SizeCatalog.Candidate>?>(null) }
     var showSaveDialog by rememberSaveable { mutableStateOf(false) }
+    // 推薦溝槽時是否保留目前的配合直徑（已有現成缸筒、軸桿時使用）
+    var keepMate by rememberSaveable { mutableStateOf(false) }
     val exportPdf = rememberPdfExport()
     val context = LocalContext.current
 
@@ -139,17 +141,25 @@ fun GlandScreen(
             .onFailure { parsed = null; thermalAnalysis = null; error = it.message }
     }
 
+    /**
+     * 推薦溝槽：預設連同缸筒內徑（軸桿外徑、端面溝槽內徑）一起推薦，
+     * 讓壓縮率、拉伸率、填充率、擋圈、熱膨脹同時合格；勾選「保留」時固定配合直徑。
+     */
     fun suggest() {
         runCatching {
-            val mate = if (sealType == SealType.FACE) 0.0 else d(mateDia)
+            val fixedMate = when {
+                !keepMate -> null
+                sealType == SealType.FACE -> d(grooveDia)
+                else -> d(mateDia)
+            }
             GlandCalculator.suggest(
-                ring(), sealType, service, mate,
+                ring(), sealType, service, fixedMate,
                 operating = operatingState.operating(unit), thermal = thermalInput(),
             )
         }.onSuccess { g ->
             grooveWidth = fmt(g.grooveWidth)
             grooveDia = fmt(g.grooveDiameter)
-            if (sealType == SealType.FACE) faceDepth = fmt(g.faceDepth)
+            if (sealType == SealType.FACE) faceDepth = fmt(g.faceDepth) else mateDia = fmt(g.mateDiameter)
             calculate()
         }.onFailure { error = it.message }
     }
@@ -311,6 +321,25 @@ fun GlandScreen(
             Button(onClick = ::calculate, modifier = Modifier.weight(1f)) { Text("計算") }
             OutlinedButton(onClick = ::suggest, modifier = Modifier.weight(1f)) { Text("推薦溝槽") }
         }
+        FilterChip(
+            selected = keepMate,
+            onClick = { keepMate = !keepMate },
+            label = {
+                Text(
+                    "推薦時保留目前的" + when (sealType) {
+                        SealType.PISTON -> "缸筒內徑"
+                        SealType.ROD -> "軸桿外徑"
+                        SealType.FACE -> "溝槽內徑"
+                    },
+                )
+            },
+        )
+        Text(
+            if (keepMate) "推薦溝槽只調整溝槽，配合直徑維持不變；O 型環與配合直徑不搭時可能無法全部合格。"
+            else "推薦溝槽會依 O 型環一併推薦配合直徑，讓壓縮、拉伸、填充、擋圈與高低溫同時合格。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         OutlinedButton(onClick = ::findSizes, modifier = Modifier.fillMaxWidth()) {
             Text("依配合直徑找適用標準尺寸")
         }
