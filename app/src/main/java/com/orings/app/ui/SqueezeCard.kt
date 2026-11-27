@@ -35,11 +35,13 @@ fun SqueezeInputSection(
     eccentric: Boolean,
     onEccentric: (Boolean) -> Unit,
     showEccentric: Boolean,
+    /** false：只輸入深度公差，線徑公差依各尺寸自動（O 型環設計分頁用） */
+    showCsTolerance: Boolean = true,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("預壓量公差（${unit.symbol}）", style = MaterialTheme.typography.labelLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
+            if (showCsTolerance) OutlinedTextField(
                 value = csTolText,
                 onValueChange = onCsTol,
                 label = { Text("線徑公差 ±") },
@@ -65,7 +67,8 @@ fun SqueezeInputSection(
             )
         }
         Text(
-            "線徑公差留空時依 AS568／JIS 規格自動帶入。",
+            if (showCsTolerance) "線徑公差留空時依 AS568／JIS 規格自動帶入。"
+            else "線徑公差依各尺寸的 AS568／JIS 規格自動帶入；深度公差留空則不判定預壓量。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -74,7 +77,7 @@ fun SqueezeInputSection(
 
 /** 預壓量結果：名目與公差最差情況 */
 @Composable
-fun SqueezeCard(r: Squeeze.Result, unit: LengthUnit) {
+fun SqueezeCard(r: Squeeze.Result, unit: LengthUnit, title: String = "預壓量") {
     fun mmPct(mm: Double, pct: Double) = "${unit.format(mm)} ${unit.symbol}（${String.format(Locale.US, "%.1f%%", pct * 100)}）"
     Card(
         Modifier.fillMaxWidth(),
@@ -89,9 +92,9 @@ fun SqueezeCard(r: Squeeze.Result, unit: LengthUnit) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 when {
-                    !r.isOk -> "✗ 預壓量不合格"
-                    r.issues.isEmpty() -> "✓ 預壓量在公差範圍內皆合格"
-                    else -> "! 預壓量有警告"
+                    !r.isOk -> "✗ ${title}不合格"
+                    r.issues.isEmpty() -> "✓ ${title}在公差範圍內皆合格"
+                    else -> "! ${title}有警告"
                 },
                 fontWeight = FontWeight.Bold,
             )

@@ -84,4 +84,23 @@ class SqueezeTest {
             }
         }
     }
+
+    @Test
+    fun ringDesignerReportsAndFiltersBySqueeze() {
+        val g = Gland(SealType.PISTON, 4.8, 20.5, 26.0)
+        val plain = RingDesigner.design(g)
+        assertEquals(null, plain.idealSqueeze)
+        assertTrue(plain.matches.all { it.squeeze == null })
+
+        val d = RingDesigner.design(g, depthTolerance = 0.05, eccentricity = 0.1)
+        assertTrue(d.idealSqueeze!!.isOk)
+        assertTrue(d.matches.isNotEmpty())
+        // 列出的標準尺寸在公差最差時都不能出錯
+        assertTrue(d.matches.all { it.squeeze != null && it.squeeze!!.isOk })
+
+        // 公差很大時，最差預壓會沒有 → 該尺寸要被排除
+        val loose = RingDesigner.design(g, depthTolerance = 1.0)
+        assertTrue(loose.matches.isEmpty())
+        assertFalse(loose.idealSqueeze!!.isOk)
+    }
 }
