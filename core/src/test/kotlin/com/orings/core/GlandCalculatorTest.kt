@@ -31,15 +31,36 @@ class GlandCalculatorTest {
     }
 
     @Test
-    fun rodSeal_noStretchWhenRingLargerThanRod() {
+    fun rodSeal_usesMeanDiameter() {
+        // 軸 20、溝槽底徑 24.2 → 溝槽中心徑 22.1；O 型環 20 × 2.62 → 中心徑 22.62
         val ring = ORing(20.0, 2.62)
         val gland = Gland(SealType.ROD, grooveWidth = 3.6, grooveDiameter = 24.2, mateDiameter = 20.0)
         val r = GlandCalculator.calculate(ring, gland)
-        assertEquals(0.0, r.stretch, eps)
+        assertEquals((22.1 - 22.62) / 22.62, r.stretch, eps)
+        // 周向擠壓時不把線徑算細
         assertEquals(2.62, r.effectiveCrossSection, eps)
         assertEquals(2.1, r.depth, eps)
         assertEquals((2.62 - 2.1) / 2.62, r.compression, eps)
         assertTrue(r.issues.toString(), r.isOk)
+    }
+
+    @Test
+    fun rodSeal_suggestIsContinuousAndSane() {
+        // 使用者回報：ID 22、CS 1.778、軸 22.8
+        val ring = ORing(22.0, 1.778)
+        for (service in Service.entries) {
+            val g = GlandCalculator.suggest(ring, SealType.ROD, service, mateDiameter = 22.8)
+            val r = GlandCalculator.calculate(ring, g, service)
+            val limits = DesignLimits.defaultFor(SealType.ROD, service)
+            assertTrue("$service $g ${r.issues}", r.issues.isEmpty())
+            assertEquals((limits.minCompression + limits.maxCompression) / 2, r.compression, 0.01)
+            // 拉伸以中心徑計算，約 +1.6%～+2.5%，不會被高估成 3.6%
+            assertTrue("$service stretch ${r.stretch}", r.stretch in 0.0..0.03)
+        }
+        // 中心徑模型在 O 型環外徑 ≈ 溝槽底徑附近是連續的
+        val a = GlandCalculator.calculate(ring, Gland(SealType.ROD, 2.4, 25.55, 22.8))
+        val b = GlandCalculator.calculate(ring, Gland(SealType.ROD, 2.4, 25.56, 22.8))
+        assertEquals(a.compression, b.compression, 0.01)
     }
 
     @Test
@@ -92,7 +113,7 @@ class GlandCalculatorTest {
         assertFalse(r.isOk)
         // 軸桿：內徑比軸徑大 10%
         val rod = Gland(SealType.ROD, 3.6, 24.2, 20.0)
-        assertTrue("VERY_LOOSE_RING" in codes(GlandCalculator.calculate(ORing(22.0, 2.62), rod)))
+        assertTrue("ROD_OVER_COMPRESSED" in codes(GlandCalculator.calculate(ORing(22.0, 2.62), rod)))
     }
 
     @Test
@@ -107,7 +128,8 @@ class GlandCalculatorTest {
         val ring = ORing(20.0, 3.53)
         for (service in Service.entries) {
             val piston = GlandCalculator.suggest(ring, SealType.PISTON, service, mateDiameter = 26.0)
-            val rod = GlandCalculator.suggest(ring, SealType.ROD, service, mateDiameter = 20.0)
+            // 軸桿：軸徑略大於 O 型環內徑，外徑才不會被溝槽擠壓過頭
+            val rod = GlandCalculator.suggest(ring, SealType.ROD, service, mateDiameter = 21.0)
             val face = GlandCalculator.suggest(ring, SealType.FACE, service)
             for (g in listOf(piston, rod, face)) {
                 val r = GlandCalculator.calculate(ring, g, service)
