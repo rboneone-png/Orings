@@ -34,6 +34,12 @@ data class DesignRecord(
     val tMaxC: Double?,
     val hardware: HardwareMaterial,
     val strictSurface: Boolean,
+    /** 線徑公差（±mm）；null = 依線徑自動 */
+    val csTolerance: Double? = null,
+    /** 溝槽深度公差（±mm） */
+    val depthTolerance: Double = 0.05,
+    /** 預壓量是否計入偏心（以擠出間隙為偏心量，只用於徑向密封） */
+    val eccentric: Boolean = true,
 ) {
     val ring: ORing get() = ORing(ringId, ringCs)
 
@@ -56,6 +62,13 @@ data class DesignRecord(
             backupRings = backupRings ?: if (rec.needsBackup) 1 else 0,
         )
     }
+
+    fun squeeze(): Squeeze.Result = Squeeze.analyze(
+        ring, gland, service,
+        csTolerance = csTolerance,
+        depthTolerance = depthTolerance,
+        eccentricity = if (eccentric && sealType != SealType.FACE) radialGap else 0.0,
+    )
 
     fun thermal(): ThermalInput? =
         if (tMinC == null || tMaxC == null) null else ThermalInput.of(tMinC, tMaxC, material, hardware)
@@ -159,6 +172,20 @@ object DesignReport {
             result.issues.map(::issueLine).ifEmpty { listOf("無問題") },
         )
 
+        val sq = rec.squeeze()
+        sections += Section(
+            "預壓量（含公差）",
+            buildList {
+                add("預壓量（名目）" to "${len(sq.nominalMm)}（${pct(sq.nominalPct)}）")
+                add("線徑公差" to "±${len(sq.csTolerance)}" + if (rec.csTolerance == null) "（自動）" else "")
+                add("溝槽深度公差" to "±${len(sq.depthTolerance)}")
+                if (rec.sealType != SealType.FACE) add("偏心" to if (rec.eccentric) len(sq.eccentricity) else "不計")
+                add("最小預壓量" to "${len(sq.minMm)}（${pct(sq.minPct)}）")
+                add("最大預壓量" to "${len(sq.maxMm)}（${pct(sq.maxPct)}）")
+            },
+            sq.issues.map(::issueLine).ifEmpty { listOf("公差範圍內預壓量皆合格") },
+        )
+
         if (op != null && rec.pressureMpa != null) {
             val rec2 = Extrusion.recommend(rec.pressureMpa, rec.radialGap)
             val pu = rec.pressureUnit
@@ -217,8 +244,8 @@ object DesignReport {
             ),
         )
 
-        val anyError = !result.isOk || (thermal != null && !thermal.isOk)
-        val anyWarning = result.issues.isNotEmpty() ||
+        val anyError = !result.isOk || (thermal != null && !thermal.isOk) || !sq.isOk
+        val anyWarning = result.issues.isNotEmpty() || sq.issues.isNotEmpty() ||
             (thermal != null && (thermal.notes.isNotEmpty() || thermal.points.any { it.result.issues.isNotEmpty() }))
         val verdict = when {
             anyError -> Verdict.ERROR

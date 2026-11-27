@@ -50,6 +50,7 @@ import com.orings.core.SealType
 import com.orings.core.Service
 import com.orings.core.Severity
 import com.orings.core.SizeCatalog
+import com.orings.core.Squeeze
 import com.orings.core.StandardSize
 
 /**
@@ -93,6 +94,11 @@ fun GlandScreen(
     var showSaveDialog by rememberSaveable { mutableStateOf(false) }
     // 推薦溝槽時是否保留目前的配合直徑（已有現成缸筒、軸桿時使用）
     var keepMate by rememberSaveable { mutableStateOf(false) }
+    // 預壓量公差：線徑公差空白 = 依線徑自動；文字依目前單位
+    var csTolText by rememberSaveable { mutableStateOf("") }
+    var depthTolText by rememberSaveable { mutableStateOf(unit.format(0.05)) }
+    var eccentric by rememberSaveable { mutableStateOf(true) }
+    var squeeze by remember { mutableStateOf<Squeeze.Result?>(null) }
     val exportPdf = rememberPdfExport()
     val context = LocalContext.current
 
@@ -103,6 +109,12 @@ fun GlandScreen(
     fun fmt(mm: Double) = unit.format(mm)
 
     fun ring() = ORing(d(ringId), d(ringCs))
+
+    /** 線徑公差：空白 = 自動（null） */
+    fun csTol(): Double? = if (csTolText.isBlank()) null else d(csTolText)
+
+    /** 偏心量 = 擠出間隙（未填或無效時 0） */
+    fun eccentricity(): Double = runCatching { operatingState.gapMm(unit) }.getOrDefault(0.0)
 
     /** 溫度欄位空白時不做熱膨脹修正；輸入無效時丟出錯誤 */
     fun thermalInput(): ThermalInput? {
@@ -119,6 +131,8 @@ fun GlandScreen(
             grooveDia = unit.convertText(grooveDia, fieldsUnit)
             grooveWidth = unit.convertText(grooveWidth, fieldsUnit)
             faceDepth = unit.convertText(faceDepth, fieldsUnit)
+            csTolText = unit.convertText(csTolText, fieldsUnit)
+            depthTolText = unit.convertText(depthTolText, fieldsUnit)
             fieldsUnit = unit
             parsed = null
         }
@@ -132,13 +146,19 @@ fun GlandScreen(
             }
             val op = operatingState.operating(unit)
             val result = GlandCalculator.calculate(ring(), gland, service, operating = op)
+            squeeze = Squeeze.analyze(
+                ring(), gland, service,
+                csTolerance = csTol(),
+                depthTolerance = d(depthTolText),
+                eccentricity = if (eccentric) eccentricity() else 0.0,
+            )
             // 沒選材質時以預設的 NBR 計算膨脹，也用 NBR 的溫度範圍提醒
             thermalAnalysis = thermalInput()?.let {
                 Thermal.analyze(ring(), gland, it, service, op, material ?: Materials.find("NBR"))
             }
             result
         }.onSuccess { parsed = it; error = null }
-            .onFailure { parsed = null; thermalAnalysis = null; error = it.message }
+            .onFailure { parsed = null; thermalAnalysis = null; squeeze = null; error = it.message }
     }
 
     /**
@@ -218,6 +238,9 @@ fun GlandScreen(
             tMaxC = if (noThermal) null else tMax.toDoubleOrNull() ?: throw IllegalArgumentException("請輸入有效的最高溫度"),
             hardware = thermalState.hardware,
             strictSurface = strictSurface,
+            csTolerance = csTol(),
+            depthTolerance = d(depthTolText),
+            eccentric = eccentric,
         ).also { it.gland } // 先驗證溝槽尺寸合理
     }
 
@@ -246,6 +269,9 @@ fun GlandScreen(
         grooveDia = rec.unit.format(rec.grooveDiameter)
         grooveWidth = rec.unit.format(rec.grooveWidth)
         faceDepth = rec.unit.format(if (rec.sealType == SealType.FACE) rec.faceDepth else 2.7)
+        csTolText = rec.csTolerance?.let(rec.unit::format) ?: ""
+        depthTolText = rec.unit.format(rec.depthTolerance)
+        eccentric = rec.eccentric
         fieldsUnit = rec.unit
         candidates = null
         onRecordConsumed()
@@ -317,6 +343,18 @@ fun GlandScreen(
 
         ThermalInputSection(thermalState, material)
 
+        SqueezeInputSection(
+            unit = unit,
+            csTolText = csTolText,
+            onCsTol = { csTolText = it },
+            autoCsTol = unit.parseToMm(ringCs)?.let(Squeeze::csTolerance),
+            depthTolText = depthTolText,
+            onDepthTol = { depthTolText = it },
+            eccentric = eccentric,
+            onEccentric = { eccentric = it },
+            showEccentric = sealType != SealType.FACE,
+        )
+
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = ::calculate, modifier = Modifier.weight(1f)) { Text("計算") }
             OutlinedButton(onClick = ::suggest, modifier = Modifier.weight(1f)) { Text("推薦溝槽") }
@@ -347,6 +385,7 @@ fun GlandScreen(
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         candidates?.let { CandidateList(it, unit, ::pickCandidate) }
         parsed?.let { ResultCard(it, unit) }
+        if (parsed != null) squeeze?.let { SqueezeCard(it, unit) }
         if (parsed != null) thermalAnalysis?.let { ThermalCard(it) }
         if (parsed != null) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
