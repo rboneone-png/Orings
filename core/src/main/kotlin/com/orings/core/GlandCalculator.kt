@@ -10,7 +10,10 @@ import kotlin.math.sqrt
  * O 型環溝槽計算核心。
  *
  * 公式說明（百分比以 0~1 表示）：
- * - 拉伸率 = (套入直徑 − O 型環內徑) ÷ O 型環內徑
+ * - 拉伸率（活塞、端面）= (溝槽直徑 − O 型環內徑) ÷ O 型環內徑
+ * - 拉伸率（軸桿）= (溝槽中心徑 − O 型環中心徑) ÷ O 型環中心徑
+ *   溝槽中心徑 = (軸徑 + 溝槽底徑) ÷ 2；O 型環中心徑 = ID + CS。
+ *   軸桿密封的 O 型環裝在殼體溝槽內、外側有溝槽底面頂住，負值代表周向被擠壓
  * - 拉伸後有效線徑 = CS ÷ √(1 + 拉伸率)（截面積依體積守恆近似縮小）
  * - 壓縮率 = (有效線徑 − 溝槽深度) ÷ 有效線徑
  * - 填充率 = 有效截面積 ÷ (溝槽深度 × 有效溝槽寬度)（未扣除溝槽圓角）
@@ -28,19 +31,25 @@ object GlandCalculator {
     /** 活塞密封：O 型環內徑比溝槽底徑大超過此比例即判定裝不穩 */
     const val MAX_LOOSE_PISTON = 0.03
 
-    /** 軸桿密封：O 型環內徑比軸徑大超過此比例即判定會起皺 */
-    const val MAX_LOOSE_ROD = 0.05
+    /** 軸桿密封：周向擠壓超過此比例即警告（可能起皺） */
+    const val ROD_COMPRESSION_WARN = 0.03
+
+    /** 軸桿密封：周向擠壓超過此比例即判定錯誤 */
+    const val ROD_COMPRESSION_ERROR = 0.06
 
     /** 推薦設計時的目標填充率 */
     const val TARGET_FILL = 0.75
 
-    fun stretch(ring: ORing, gland: Gland): Double {
-        val seatDiameter = when (gland.sealType) {
-            SealType.PISTON -> gland.grooveDiameter
-            SealType.ROD -> gland.mateDiameter
-            SealType.FACE -> gland.grooveDiameter
-        }
-        return (seatDiameter - ring.innerDiameter) / ring.innerDiameter
+    fun stretch(ring: ORing, gland: Gland): Double = when (gland.sealType) {
+        SealType.ROD -> rodStretch(ring, gland.mateDiameter, gland.grooveDiameter)
+        SealType.PISTON, SealType.FACE -> (gland.grooveDiameter - ring.innerDiameter) / ring.innerDiameter
+    }
+
+    /** 軸桿密封：以中心徑比較，正值 = 被撐開，負值 = 周向被擠壓 */
+    fun rodStretch(ring: ORing, rodDiameter: Double, grooveDiameter: Double): Double {
+        val glandMean = (rodDiameter + grooveDiameter) / 2
+        val ringMean = ring.innerDiameter + ring.crossSection
+        return (glandMean - ringMean) / ringMean
     }
 
     /** 拉伸後的有效線徑；未拉伸（或鬆配）時維持原線徑 */
@@ -90,8 +99,11 @@ object GlandCalculator {
                 stretch < -MAX_LOOSE_PISTON && gland.sealType == SealType.PISTON -> add(
                     Issue(Severity.ERROR, "VERY_LOOSE_RING", "O 型環內徑比溝槽底徑大 ${pct(-stretch)}，裝不穩，請選內徑較小的尺寸")
                 )
-                stretch < -MAX_LOOSE_ROD && gland.sealType == SealType.ROD -> add(
-                    Issue(Severity.ERROR, "VERY_LOOSE_RING", "O 型環內徑比軸徑大 ${pct(-stretch)}，外徑會被溝槽擠壓起皺，請選內徑較小的尺寸")
+                stretch < -ROD_COMPRESSION_ERROR && gland.sealType == SealType.ROD -> add(
+                    Issue(Severity.ERROR, "ROD_OVER_COMPRESSED", "O 型環比溝槽大，周向被擠壓 ${pct(-stretch)}，裝入後會起皺，請選內徑較小的尺寸")
+                )
+                stretch < -ROD_COMPRESSION_WARN && gland.sealType == SealType.ROD -> add(
+                    Issue(Severity.WARNING, "ROD_COMPRESSED", "O 型環周向被擠壓 ${pct(-stretch)}，高於建議上限 ${pct(ROD_COMPRESSION_WARN)}，可能起皺")
                 )
                 stretch < 0 && gland.sealType == SealType.PISTON -> add(
                     Issue(Severity.WARNING, "LOOSE_RING", "O 型環內徑大於溝槽底徑，安裝時可能鬆脫或扭轉")
@@ -205,7 +217,16 @@ object GlandCalculator {
 
             SealType.ROD -> {
                 require(mateDiameter > 0) { "請輸入軸桿外徑" }
-                val (depth, width) = dims((mateDiameter - ring.innerDiameter) / ring.innerDiameter)
+                // 溝槽底徑會影響中心徑與拉伸率，迭代幾次收斂
+                var grooveDia = mateDiameter + 2 * ring.crossSection
+                var depth = 0.0
+                var width = 0.0
+                repeat(10) {
+                    val (d, w) = dims(rodStretch(ring, mateDiameter, grooveDia))
+                    depth = d
+                    width = w
+                    grooveDia = mateDiameter + 2 * d
+                }
                 Gland(sealType, round2(width), round2(mateDiameter + 2 * round2(depth)), mateDiameter)
             }
 

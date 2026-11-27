@@ -73,11 +73,14 @@ object RingDesigner {
             )
         }
 
-        // 套入直徑：活塞與端面是溝槽直徑，軸桿是軸徑
-        val seat = if (gland.sealType == SealType.ROD) gland.mateDiameter else gland.grooveDiameter
-        val idealId = seat / (1 + targetStretch)
         val effectiveCs = gland.depth / (1 - targetCompression)
         val idealCs = effectiveCs * sqrt(1 + targetStretch)
+        val idealId = if (gland.sealType == SealType.ROD) {
+            // 軸桿：O 型環中心徑 = 溝槽中心徑 ÷ (1 + 目標拉伸)
+            (gland.mateDiameter + gland.grooveDiameter) / 2 / (1 + targetStretch) - idealCs
+        } else {
+            gland.grooveDiameter / (1 + targetStretch)
+        }
         val idealRing = ORing(idealId, idealCs)
         val idealResult = GlandCalculator.calculate(idealRing, gland, service, limits, operating)
         val idealThermal = thermal?.let { Thermal.analyze(idealRing, gland, it, service, operating, material) }

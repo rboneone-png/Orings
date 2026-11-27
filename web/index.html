@@ -488,7 +488,7 @@ const Core = (() => {
   }
 
   const HARD_MAX_COMPRESSION = 0.40, HARD_MAX_STRETCH = 0.08, TARGET_FILL = 0.75;
-  const MAX_LOOSE_PISTON = 0.03, MAX_LOOSE_ROD = 0.05;
+  const MAX_LOOSE_PISTON = 0.03, ROD_COMPRESSION_WARN = 0.03, ROD_COMPRESSION_ERROR = 0.06;
   const num = (v) => v.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 
   // ---- 硬度與擠出極限（與 Kotlin Extrusion 相同的近似值） ----
@@ -534,9 +534,10 @@ const Core = (() => {
     return { pressureMpa, radialGap, hardness, backupRings };
   }
 
+  // 軸桿密封以中心徑比較：O 型環裝在殼體溝槽內、外側有溝槽底面頂住，負值代表周向被擠壓
+  const rodStretch = (ring, rod, grooveDia) => ((rod + grooveDia) / 2 - (ring.id + ring.cs)) / (ring.id + ring.cs);
   function stretch(ring, g) {
-    const seat = g.type === "ROD" ? g.mate : g.grooveDia;
-    return (seat - ring.id) / ring.id;
+    return g.type === "ROD" ? rodStretch(ring, g.mate, g.grooveDia) : (g.grooveDia - ring.id) / ring.id;
   }
   const effCs = (cs, s) => (s > 0 ? cs / Math.sqrt(1 + s) : cs);
 
@@ -558,7 +559,8 @@ const Core = (() => {
     if (s > HARD_MAX_STRETCH) add("ERROR", "OVER_STRETCH", `拉伸率 ${pct(s)} 過高，線徑變細且加速老化`);
     else if (s > limits.maxS) add("WARNING", "HIGH_STRETCH", `拉伸率 ${pct(s)} 高於建議上限 ${pct(limits.maxS)}`);
     else if (s < -MAX_LOOSE_PISTON && g.type === "PISTON") add("ERROR", "VERY_LOOSE_RING", `O 型環內徑比溝槽底徑大 ${pct(-s)}，裝不穩，請選內徑較小的尺寸`);
-    else if (s < -MAX_LOOSE_ROD && g.type === "ROD") add("ERROR", "VERY_LOOSE_RING", `O 型環內徑比軸徑大 ${pct(-s)}，外徑會被溝槽擠壓起皺，請選內徑較小的尺寸`);
+    else if (s < -ROD_COMPRESSION_ERROR && g.type === "ROD") add("ERROR", "ROD_OVER_COMPRESSED", `O 型環比溝槽大，周向被擠壓 ${pct(-s)}，裝入後會起皺，請選內徑較小的尺寸`);
+    else if (s < -ROD_COMPRESSION_WARN && g.type === "ROD") add("WARNING", "ROD_COMPRESSED", `O 型環周向被擠壓 ${pct(-s)}，高於建議上限 ${pct(ROD_COMPRESSION_WARN)}，可能起皺`);
     else if (s < 0 && g.type === "PISTON") add("WARNING", "LOOSE_RING", "O 型環內徑大於溝槽底徑，安裝時可能鬆脫或扭轉");
 
     if (effWidth < cs) add("ERROR", "NARROW_GROOVE", backups > 0 ? "扣除擋圈後的溝槽寬度小於線徑，O 型環與擋圈放不進去" : "溝槽寬度小於線徑，O 型環放不進去");
@@ -608,7 +610,12 @@ const Core = (() => {
     }
     if (type === "ROD") {
       if (!(mate > 0)) throw new Error("請輸入軸桿外徑");
-      const [depth, width] = dims((mate - ring.id) / ring.id);
+      // 溝槽底徑會影響中心徑與拉伸率，迭代幾次收斂
+      let grooveDia = mate + 2 * ring.cs, depth = 0, width = 0;
+      for (let i = 0; i < 10; i++) {
+        [depth, width] = dims(rodStretch(ring, mate, grooveDia));
+        grooveDia = mate + 2 * depth;
+      }
       return gland(type, round2(width), round2(mate + 2 * round2(depth)), mate);
     }
     const [depth, width] = dims(0);
@@ -783,9 +790,9 @@ const Core = (() => {
     const op = pressure === null ? null : operating(pressure, gap,
       hardness || (rec && rec.hardness) || "A90",
       backups !== null ? backups : (rec && rec.needsBackup ? 1 : 0));
-    const seat = g.type === "ROD" ? g.mate : g.grooveDia;
-    const idealId = seat / (1 + ts);
     const idealCs = g.depth / (1 - tc) * Math.sqrt(1 + ts);
+    // 軸桿：O 型環中心徑 = 溝槽中心徑 ÷ (1 + 目標拉伸)
+    const idealId = g.type === "ROD" ? (g.mate + g.grooveDia) / 2 / (1 + ts) - idealCs : g.grooveDia / (1 + ts);
     const idealRing = oring(idealId, idealCs);
     const idealResult = calculate(idealRing, g, service, limits, op);
     const idealThermal = thermal ? thermalAnalyze(idealRing, g, thermal, service, op, material) : null;
