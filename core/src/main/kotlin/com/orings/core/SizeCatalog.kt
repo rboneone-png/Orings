@@ -51,11 +51,8 @@ object SizeCatalog {
     ): List<Candidate> {
         require(mateDiameter > 0) { "請輸入配合直徑" }
         val limits = DesignLimits.defaultFor(sealType, service)
-        // 理想拉伸率：活塞與端面略拉伸以免鬆脫；軸桿盡量不拉伸
-        val targetStretch = when (sealType) {
-            SealType.ROD -> 0.0
-            else -> limits.maxStretch / 2
-        }
+        // 理想拉伸率：與推薦溝槽相同（活塞略撐緊；軸桿、端面不撐開）
+        val targetStretch = GlandCalculator.targetStretch(sealType, limits)
 
         val candidates = all.asSequence()
             .filter { it.standard in standards && !it.isPortSeal && it.suitableForService(service) }
@@ -64,8 +61,7 @@ object SizeCatalog {
             .mapNotNull { size ->
                 val ring = size.toORing()
                 val gland = runCatching {
-                    val g = GlandCalculator.suggest(ring, sealType, service, mateDiameter)
-                    if (sealType == SealType.FACE) g.copy(grooveDiameter = mateDiameter) else g
+                    GlandCalculator.suggest(ring, sealType, service, mateDiameter)
                 }.getOrNull() ?: return@mapNotNull null
                 val result = GlandCalculator.calculate(ring, gland, service)
                 when {

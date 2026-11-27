@@ -239,6 +239,8 @@ tr.pick:hover td { background: var(--accent-soft); }
             <button class="btn primary" id="btnSuggest" type="button">推薦溝槽尺寸</button>
             <button class="btn" id="btnFind" type="button">依配合直徑找標準尺寸</button>
           </div>
+          <div class="chips"><button class="chip" type="button" id="keepMate" aria-pressed="false">推薦時保留目前的缸筒內徑</button></div>
+          <div class="hint" id="keepMateHint"></div>
         </div>
 
         <div class="group" id="op-d"></div>
@@ -485,7 +487,7 @@ const Core = (() => {
     return { minC: 0.15, maxC: 0.30, maxS: 0.05, maxF: 0.85 };
   }
 
-  const HARD_MAX_COMPRESSION = 0.40, HARD_MAX_STRETCH = 0.08, TARGET_FILL = 0.75;
+  const HARD_MAX_COMPRESSION = 0.40, HARD_MAX_STRETCH = 0.08, TARGET_FILL = 0.75, HARD_90A_MAX_COMPRESSION = 0.25;
   const MAX_LOOSE_PISTON = 0.03, ROD_COMPRESSION_WARN = 0.03, ROD_COMPRESSION_ERROR = 0.06;
   const num = (v) => v.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 
@@ -570,54 +572,84 @@ const Core = (() => {
       if (p > extLimit) add("ERROR", "EXTRUSION", `壓力 ${num(p)} MPa 超過 ${h} 的擠出極限約 ${num(extLimit)} MPa，請提高硬度、縮小間隙或加擋圈`);
       else if (p > extLimit * Extrusion.WARN) add("WARNING", "NEAR_EXTRUSION", `壓力已達 ${h} 擠出極限（約 ${num(extLimit)} MPa）的 ${pct(p / extLimit)}，餘裕不足`);
       if (op.hardness === "A90" && p < 2.0 && backups === 0) add("WARNING", "HARD_LOW_PRESSURE", "壓力低於 2 MPa 時 90A 密封性較差，建議 70A");
-      if (op.hardness === "A90" && compression > 0.25) add("WARNING", "HARD_HIGH_SQUEEZE", "90A 壓縮率超過 25%，安裝力大且易永久變形");
+      if (op.hardness === "A90" && compression > HARD_90A_MAX_COMPRESSION) add("WARNING", "HARD_HIGH_SQUEEZE", "90A 壓縮率超過 25%，安裝力大且易永久變形");
     }
 
     return { depth, stretch: s, cs, compression, fill, limits, issues, effWidth, extLimit,
       isOk: !issues.some((i) => i.severity === "ERROR") };
   }
 
-  function suggest(ring, type, service = "STATIC", mate = 0, limits = limitsFor(type, service), op = null, thermal = null) {
-    const g0 = suggestRoom(ring, type, service, mate, limits, op);
-    if (!thermal || thermal.tMaxC <= thermal.assemblyC) return g0;
-    // 高溫時 O 型環膨脹比溝槽多，填充率上升：用實際高溫計算的填充率回推所需寬度
+  // 目標拉伸率：活塞取上限一半；軸桿（中心徑）與端面取 0
+  const targetStretch = (type, limits) => (type === "PISTON" ? limits.maxS / 2 : 0);
+  /**
+   * 依 O 型環推薦整組溝槽（與 Kotlin GlandCalculator.suggest 相同）：
+   * mate 為 null 或 ≤ 0 時一併推薦配合直徑；深度讓高低溫壓縮率平均 = 中間值；寬度依填充率、擋圈、高溫填充。
+   */
+  function suggest(ring, type, service = "STATIC", mate = null, limits = limitsFor(type, service), op = null, thermal = null) {
+    const fixed = mate !== null && mate > 0 ? mate : null;
+    const maxC = op && op.hardness === "A90" ? Math.min(limits.maxC, HARD_90A_MAX_COMPRESSION) : limits.maxC;
+    const tc = (limits.minC + maxC) / 2;
+    let ts = targetStretch(type, limits);
+    if (thermal) {
+      const k = (t) => { const dT = t - thermal.assemblyC; return (1 + thermal.hardwareCte * dT) / (1 + thermal.ringCte * dT); };
+      ts = (1 + ts) * 2 / (k(thermal.tMinC) + k(thermal.tMaxC)) - 1;
+    }
     const backupWidth = (op ? op.backupRings : 0) * Extrusion.backupThickness(ring.cs);
-    const [hr, hg] = thermalAt(ring, g0, thermal, thermal.tMaxC);
-    const hotFill = calculate(hr, hg, service, limits, op).fill;
-    if (hotFill <= HOT_FILL_TARGET) return g0;
-    const width = (g0.width - backupWidth) * hotFill / HOT_FILL_TARGET + backupWidth;
-    return gland(g0.type, Math.ceil(width * 100) / 100, g0.grooveDia, g0.mate, g0.faceDepth);
-  }
-  function suggestRoom(ring, type, service, mate, limits, op) {
-    const target = (limits.minC + limits.maxC) / 2;
-    const backupWidth = (op ? op.backupRings : 0) * Extrusion.backupThickness(ring.cs);
-    const dims = (s) => {
-      const cs = effCs(ring.cs, s);
-      const depth = cs * (1 - target);
-      const width = Math.max(Math.PI * cs * cs / 4 / (depth * TARGET_FILL), cs * 1.05);
-      return [depth, width + backupWidth];
+    const id = ring.id, cs = ring.cs;
+    const build = (depth, width = cs * 3 + backupWidth) => {
+      if (type === "PISTON") {
+        const groove = fixed !== null ? fixed - 2 * depth : id * (1 + ts);
+        return gland(type, width, groove, fixed !== null ? fixed : groove + 2 * depth);
+      }
+      if (type === "ROD") {
+        const mean = (id + cs) * (1 + ts);
+        const rod = fixed !== null ? fixed : mean - depth;
+        return gland(type, width, rod + 2 * depth, rod);
+      }
+      return gland(type, width, fixed !== null ? fixed : id, 0, depth);
     };
+    const meanCompression = (depth) => {
+      const g = build(depth);
+      if (!thermal) return calculate(ring, g, service, limits).compression;
+      const [r1, g1] = thermalAt(ring, g, thermal, thermal.tMinC);
+      const [r2, g2] = thermalAt(ring, g, thermal, thermal.tMaxC);
+      return (calculate(r1, g1, service, limits).compression + calculate(r2, g2, service, limits).compression) / 2;
+    };
+    if (type === "PISTON" && fixed !== null && !(fixed > cs)) throw new Error("缸筒內徑太小");
+    // 壓縮率隨深度遞減，用二分法找出平均壓縮率 = 中間值的深度
+    let lo = cs * 0.3;
+    let hi = type === "PISTON" && fixed !== null ? Math.min(cs * 1.2, fixed * 0.45) : cs * 1.2;
+    for (let i = 0; i < 60; i++) {
+      const midD = (lo + hi) / 2;
+      if (meanCompression(midD) > tc) lo = midD; else hi = midD;
+    }
+    const depth = round2((lo + hi) / 2);
+    const raw = build(depth);
+    let rounded;
     if (type === "PISTON") {
-      if (!(mate > 0)) throw new Error("請輸入缸筒內徑");
-      let grooveDia = mate - 2 * ring.cs, depth = 0, width = 0;
-      for (let i = 0; i < 10; i++) {
-        [depth, width] = dims((grooveDia - ring.id) / ring.id);
-        grooveDia = mate - 2 * depth;
-      }
-      return gland(type, round2(width), round2(mate - 2 * round2(depth)), mate);
+      const groove = round2(raw.grooveDia);
+      rounded = gland(type, raw.width, groove, fixed !== null ? fixed : round2(groove + 2 * depth));
+    } else if (type === "ROD") {
+      const rod = fixed !== null ? fixed : round2(raw.mate);
+      rounded = gland(type, raw.width, round2(rod + 2 * depth), rod);
+    } else {
+      rounded = gland(type, raw.width, fixed !== null ? fixed : round2(raw.grooveDia), 0, depth);
     }
-    if (type === "ROD") {
-      if (!(mate > 0)) throw new Error("請輸入軸桿外徑");
-      // 溝槽底徑會影響中心徑與拉伸率，迭代幾次收斂
-      let grooveDia = mate + 2 * ring.cs, depth = 0, width = 0;
-      for (let i = 0; i < 10; i++) {
-        [depth, width] = dims(rodStretch(ring, mate, grooveDia));
-        grooveDia = mate + 2 * depth;
+    // 寬度：組裝時填充率 = 目標值（以組裝溫度的有效線徑計算）
+    const room = calculate(ring, rounded, service, limits);
+    const ec = room.cs;
+    const width = Math.max(Math.PI * ec * ec / 4 / (room.depth * TARGET_FILL), ec * 1.05) + backupWidth;
+    let g = gland(type, round2(width), rounded.grooveDia, rounded.mate, rounded.faceDepth);
+    // 高溫時 O 型環膨脹比溝槽多，填充率上升：用實際高溫計算的填充率回推所需寬度
+    if (thermal && thermal.tMaxC > thermal.assemblyC) {
+      const [hr, hg] = thermalAt(ring, g, thermal, thermal.tMaxC);
+      const hotFill = calculate(hr, hg, service, limits, op).fill;
+      if (hotFill > HOT_FILL_TARGET) {
+        const w = (g.width - backupWidth) * hotFill / HOT_FILL_TARGET + backupWidth;
+        g = gland(type, Math.ceil(w * 100) / 100, g.grooveDia, g.mate, g.faceDepth);
       }
-      return gland(type, round2(width), round2(mate + 2 * round2(depth)), mate);
     }
-    const [depth, width] = dims(0);
-    return gland(type, round2(width), ring.id, 0, round2(depth));
+    return g;
   }
 
   // ---- 單位 ----
@@ -729,7 +761,7 @@ const Core = (() => {
   function suitableFor(type, service, mate, standards = Object.keys(Standards)) {
     if (!(mate > 0)) throw new Error("請輸入配合直徑");
     const limits = limitsFor(type, service);
-    const target = type === "ROD" ? 0 : limits.maxS / 2;
+    const target = targetStretch(type, limits);
     const cands = [];
     for (const size of allSizes) {
       if (!standards.includes(size.standard) || isPortSeal(size) || !okForService(size, service)) continue;
@@ -738,7 +770,6 @@ const Core = (() => {
       let g;
       try {
         g = suggest(ring, type, service, mate);
-        if (type === "FACE") g = gland("FACE", g.width, mate, 0, g.faceDepth);
       } catch (e) { continue; }
       const r = calculate(ring, g, service);
       if (r.issues.length) continue;
@@ -783,7 +814,7 @@ const Core = (() => {
                       thermal = null, material = null, standards = Object.keys(Standards), limit = 10) {
     const limits = limitsFor(g.type, service);
     const tc = (limits.minC + limits.maxC) / 2;
-    const ts = g.type === "ROD" ? 0 : limits.maxS / 2;
+    const ts = targetStretch(g.type, limits);
     const rec = pressure === null ? null : Extrusion.recommend(pressure, gap);
     const op = pressure === null ? null : operating(pressure, gap,
       hardness || (rec && rec.hardness) || "A90",
@@ -1048,6 +1079,7 @@ if (typeof module !== "undefined") module.exports = Core;
     // O型環設計分頁的溝槽
     rseal: store.get("rseal", "PISTON"),
     sfStrict: store.get("sfStrict", false),
+    keepMate: store.get("keepMate", false),
     thMin: store.get("thMin", "-20"),
     thMax: store.get("thMax", "80"),
     hw: store.get("hw", "STEEL"),
@@ -1057,7 +1089,7 @@ if (typeof module !== "undefined") module.exports = Core;
   const fieldIds = { id: "f-id", cs: "f-cs", mate: "f-mate", groove: "f-groove", width: "f-width", face: "f-face" };
   const unit = () => Core.Units[state.unit];
   const save = () => ["tab", "unit", "seal", "service", "mm", "sizeLabel", "material", "tMin", "tMax", "media", "stds",
-    "pUnit", "pText", "gapMm", "hard", "bak", "rseal", "rmm", "sfStrict", "thMin", "thMax", "hw"].forEach((k) => store.set(k, state[k]));
+    "pUnit", "pText", "gapMm", "hard", "bak", "rseal", "rmm", "sfStrict", "thMin", "thMax", "hw", "keepMate"].forEach((k) => store.set(k, state[k]));
 
   function segment(el, items, current, onPick) {
     el.innerHTML = items.map(([k, label]) =>
@@ -1111,6 +1143,7 @@ if (typeof module !== "undefined") module.exports = Core;
 
   function renderSealControls() {
     segment($("sealSeg"), sealItems, state.seal, (k) => { state.seal = k; renderSealControls(); renderDesign(); save(); });
+    renderKeepMate();
     segment($("serviceSeg"), serviceItems, state.service, setService);
     segment($("serviceSeg2"), serviceItems, state.service, setService);
     const face = state.seal === "FACE";
@@ -1316,13 +1349,25 @@ if (typeof module !== "undefined") module.exports = Core;
     `;
   }
 
+  // 推薦溝槽：預設連同缸筒內徑（軸桿外徑、端面溝槽內徑）一起推薦；勾選「保留」時固定配合直徑
+  function renderKeepMate() {
+    const name = { PISTON: "缸筒內徑", ROD: "軸桿外徑", FACE: "溝槽內徑" }[state.seal];
+    $("keepMate").textContent = "推薦時保留目前的" + name;
+    $("keepMate").setAttribute("aria-pressed", String(state.keepMate));
+    $("keepMateHint").textContent = state.keepMate
+      ? "推薦溝槽只調整溝槽，配合直徑維持不變；O 型環與配合直徑不搭時可能無法全部合格。"
+      : "推薦溝槽會依 O 型環一併推薦配合直徑，讓壓縮、拉伸、填充、擋圈與高低溫同時合格。";
+  }
+  $("keepMate").onclick = () => { state.keepMate = !state.keepMate; renderKeepMate(); save(); };
+
   $("btnSuggest").onclick = () => {
     try {
       const ring = Core.oring(state.mm.id, state.mm.cs);
-      const g = Core.suggest(ring, state.seal, state.service, state.seal === "FACE" ? 0 : state.mm.mate,
+      const fixed = !state.keepMate ? null : state.seal === "FACE" ? state.mm.groove : state.mm.mate;
+      const g = Core.suggest(ring, state.seal, state.service, fixed,
         Core.limitsFor(state.seal, state.service), computeOp().op, currentThermal());
       state.mm.width = g.width; state.mm.groove = g.grooveDia;
-      if (state.seal === "FACE") state.mm.face = g.faceDepth;
+      if (state.seal === "FACE") state.mm.face = g.faceDepth; else state.mm.mate = g.mate;
       writeFields(); renderDesign(); save();
     } catch (e) { $("err").hidden = false; $("err").textContent = e.message; }
   };

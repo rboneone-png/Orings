@@ -61,7 +61,7 @@ object RingDesigner {
     ): Design {
         val limits = DesignLimits.defaultFor(gland.sealType, service)
         val targetCompression = (limits.minCompression + limits.maxCompression) / 2
-        val targetStretch = if (gland.sealType == SealType.ROD) 0.0 else limits.maxStretch / 2
+        val targetStretch = GlandCalculator.targetStretch(gland.sealType, limits)
 
         val recommendation = pressureMpa?.let { Extrusion.recommend(it, radialGap) }
         val operating = pressureMpa?.let {

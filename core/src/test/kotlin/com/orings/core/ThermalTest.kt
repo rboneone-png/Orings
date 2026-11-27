@@ -86,10 +86,12 @@ class ThermalTest {
         val atMax = Thermal.analyze(ring, hot, hotInput).points.last().result
         assertTrue("${atMax.fill}", atMax.fill <= Thermal.HOT_FILL_TARGET + 1e-9)
         assertTrue(atMax.fill > Thermal.HOT_FILL_TARGET - 0.01) // 沒有加寬過頭
-        // 低溫範圍不影響推薦
-        val cold = GlandCalculator.suggest(ring, SealType.PISTON, mateDiameter = 26.0,
-            thermal = ThermalInput.of(-40.0, 20.0, Materials.find("NBR"), HardwareMaterial.STEEL))
-        assertEquals(plain, cold)
+        // 只有低溫：寬度不需加寬，且低溫時壓縮率仍在建議範圍內
+        val coldInput = ThermalInput.of(-40.0, 20.0, Materials.find("NBR"), HardwareMaterial.STEEL)
+        val cold = GlandCalculator.suggest(ring, SealType.PISTON, mateDiameter = 26.0, thermal = coldInput)
+        assertEquals(plain.grooveWidth, cold.grooveWidth, 0.05)
+        val c = Thermal.analyze(ring, cold, coldInput).points[1].result
+        assertTrue(c.issues.toString(), c.issues.isEmpty())
     }
 
     @Test

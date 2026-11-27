@@ -106,7 +106,11 @@ class HardnessAndDesignTest {
 
     @Test
     fun suggest_addsBackupWidth() {
-        val plain = GlandCalculator.suggest(ring, SealType.PISTON, mateDiameter = 26.0)
+        // 相同硬度下比較：差別只在擋圈
+        val plain = GlandCalculator.suggest(
+            ring, SealType.PISTON, mateDiameter = 26.0,
+            operating = Operating(20.0, 0.1, Hardness.A90, backupRings = 0),
+        )
         val withBackup = GlandCalculator.suggest(
             ring, SealType.PISTON, mateDiameter = 26.0,
             operating = Operating(20.0, 0.1, Hardness.A90, backupRings = 1),
