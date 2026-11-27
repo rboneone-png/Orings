@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- O 型環被上下兩片壓板壓縮（預壓）的示意 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- 上下壓板 -->
+    <path android:fillColor="#FF000000" android:pathData="M36,25.5h36v6h-36z" />
+    <path android:fillColor="#FF000000" android:pathData="M36,76.5h36v6h-36z" />
+    <!-- O 型環（壓縮成橢圓） -->
+    <path android:strokeColor="#FF000000" android:strokeWidth="11" android:fillColor="#00000000"
+        android:pathData="M33,54a21,17 0 1,1 42,0a21,17 0 1,1 -42,0" />
+
+</vector>
