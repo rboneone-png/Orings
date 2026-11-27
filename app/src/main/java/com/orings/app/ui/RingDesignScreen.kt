@@ -57,6 +57,10 @@ fun RingDesignScreen(
     var grooveWidth by rememberSaveable { mutableStateOf(unit.format(4.8)) }
     var faceDepth by rememberSaveable { mutableStateOf(unit.format(2.7)) }
 
+    // 預壓量：深度公差（空白 = 不判定）與偏心
+    var depthTol by rememberSaveable { mutableStateOf(unit.format(0.05)) }
+    var eccentric by rememberSaveable { mutableStateOf(true) }
+
     var fieldsUnit by rememberSaveable { mutableStateOf(unit) }
     LaunchedEffect(unit) {
         if (fieldsUnit != unit) {
@@ -64,6 +68,7 @@ fun RingDesignScreen(
             grooveDia = unit.convertText(grooveDia, fieldsUnit)
             grooveWidth = unit.convertText(grooveWidth, fieldsUnit)
             faceDepth = unit.convertText(faceDepth, fieldsUnit)
+            if (depthTol.isNotBlank()) depthTol = unit.convertText(depthTol, fieldsUnit)
             fieldsUnit = unit
         }
     }
@@ -78,6 +83,7 @@ fun RingDesignScreen(
         }
         val op = operatingState
         val gap = if (op.pressureMpa() != null) op.gapMm(unit) else 0.1
+        val tol = if (depthTol.isBlank()) null else d(depthTol).also { require(it >= 0) { "溝槽深度公差不能是負數" } }
         gland to RingDesigner.design(
             gland = gland,
             service = service,
@@ -88,6 +94,8 @@ fun RingDesignScreen(
             thermal = thermalState.input(material),
             // 沒選材質時以預設的 NBR 計算膨脹，也用 NBR 的溫度範圍提醒
             material = material ?: Materials.find("NBR"),
+            depthTolerance = tol,
+            eccentricity = if (eccentric && sealType != SealType.FACE) op.gapMm(unit) else 0.0,
         )
     }
 
@@ -125,9 +133,19 @@ fun RingDesignScreen(
 
         ThermalInputSection(thermalState, material)
 
+        SqueezeInputSection(
+            unit = unit,
+            csTolText = "", onCsTol = {}, autoCsTol = null,
+            depthTolText = depthTol, onDepthTol = { depthTol = it },
+            eccentric = eccentric, onEccentric = { eccentric = it },
+            showEccentric = sealType != SealType.FACE,
+            showCsTolerance = false,
+        )
+
         outcome.onFailure { Text(it.message ?: "輸入有誤", color = MaterialTheme.colorScheme.error) }
         outcome.onSuccess { (gland, design) ->
             IdealCard(design, unit)
+            design.idealSqueeze?.let { SqueezeCard(it, unit, title = "理想尺寸的預壓量") }
             design.idealThermal?.let { ThermalCard(it, title = "理想尺寸的熱膨脹修正") }
             MatchList(design, unit) { size -> onPick(size, gland) }
         }
@@ -182,7 +200,11 @@ private fun MatchList(design: RingDesigner.Design, unit: LengthUnit, onPick: (St
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
-                "合適的標準尺寸（點選帶入溝槽設計）" + if (design.idealThermal != null) "，已排除高低溫會出錯的尺寸" else "",
+                "合適的標準尺寸（點選帶入溝槽設計）" +
+                    listOfNotNull(
+                        "高低溫".takeIf { design.idealThermal != null },
+                        "公差最差時預壓量".takeIf { design.idealSqueeze != null },
+                    ).joinToString("、").let { if (it.isEmpty()) "" else "，已排除${it}會出錯的尺寸" },
                 fontWeight = FontWeight.Bold,
             )
             if (design.matches.isEmpty()) {
@@ -218,6 +240,15 @@ private fun MatchList(design: RingDesigner.Design, unit: LengthUnit, onPick: (St
                                 if (thermalWarnings > 0) "　! 高低溫 $thermalWarnings 項警告" else "",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    m.squeeze?.let { sq ->
+                        Text(
+                            "預壓 %s～%s %s（%.1f%%～%.1f%%）".format(
+                                unit.format(sq.minMm), unit.format(sq.maxMm), unit.symbol, sq.minPct * 100, sq.maxPct * 100,
+                            ) + if (sq.issues.isNotEmpty()) "　! " + sq.issues.joinToString("；") { it.message } else "　✓",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (sq.issues.isNotEmpty()) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
